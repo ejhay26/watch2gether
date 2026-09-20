@@ -1,0 +1,36 @@
+name: Supabase Keep-Alive Cron
+
+on:
+  schedule:
+    # Runs every 2 days at 00:00 UTC to reset Supabase's 7-day inactivity pause
+    - cron: '0 0 */2 * *'
+  workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST Endpoint
+        run: |
+          SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
+          SUPABASE_KEY="${{ secrets.SUPABASE_ANON_KEY }}"
+          
+          # Default to project credentials if secrets are not explicitly set
+          if [ -z "$SUPABASE_URL" ]; then
+            SUPABASE_URL="https://xlciaxmmpqggacedbtsy.supabase.co"
+          fi
+          if [ -z "$SUPABASE_KEY" ]; then
+            SUPABASE_KEY="sb_publishable_MWhAX8M8Lj9y24PTHbltVQ_3FE2HsiL"
+          fi
+          
+          echo "Sending automated keep-alive ping to $SUPABASE_URL..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$SUPABASE_URL/rest/v1/" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY")
+            
+          echo "Supabase responded with HTTP status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 500 ]; then
+            echo "Success: Supabase activity timer reset. Database remains active."
+          else
+            echo "Warning: Unexpected status $HTTP_STATUS"
+          fi
