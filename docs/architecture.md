@@ -13,50 +13,47 @@ Watch2Gether is a full-stack, cross-platform media streaming and synchronized vi
 │  - Video Core: media_kit (libmpv hardware decoding)              │
 │  - Desktop UX: Hover-to-reveal controls, auto-hide, MPV hotkeys  │
 │  - Mobile UX: Double-tap seek, brightness & volume gestures      │
+│  - Auto-bypasses ngrok warning via ngrok-skip-browser-warning    │
 └──────────────────┬─────────────────────────────▲─────────────────┘
                    │ REST API                    │ WebSockets
                    ▼                             │
 ┌────────────────────────────────────────────────┴─────────────────┐
-│        ORACLE CLOUD ALWAYS FREE DEDICATED VM (24/7)              │
+│     PERSISTENT NGROK SECURE TUNNEL (HTTPS & WSS)                 │
+│     https://nuclei-oil-modular.ngrok-free.dev                    │
+└──────────────────┬─────────────────────────────▲─────────────────┘
+                   ▼                             │
+┌────────────────────────────────────────────────┴─────────────────┐
+│                    GOLANG BACKEND SERVICE                        │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │                    GOLANG BACKEND SERVICE                  │  │
-│  │  ┌───────────────────────┐       ┌──────────────────────┐  │  │
-│  │  │  Scraper Engine       │       │  WebSocket Room Hub  │  │  │
-│  │  │  - AES key decryptor  │       │  - Room lifecycle    │  │  │
-│  │  │  - m3u8 playlist parse│       │  - Timestamp sync    │  │  │
-│  │  │  - Subtitle extract   │       │  - In-room chat      │  │  │
-│  │  └───────────┬───────────┘       └──────────┬───────────┘  │  │
-│  └──────────────┼──────────────────────────────┼──────────────┘  │
-│                 ▼                              ▼                 │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │                NATIVE POSTGRESQL DATABASE                  │  │
-│  │  - Users, JWT authentication, Profiles                     │  │
-│  │  - Watch History & Resume Progress                         │  │
-│  │  - Fast local socket access (<0.5ms latency)               │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │             ANTI-IDLE KEEP-ALIVE SYSTEM SERVICE            │  │
-│  │  - Guarantees VM activity to bypass Oracle reclamation     │  │
-│  └────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
+│  ┌───────────────────────┐             ┌──────────────────────┐  │
+│  │  Scraper Engine       │             │  WebSocket Room Hub  │  │
+│  │  - AES key decryptor  │             │  - Room lifecycle    │  │
+│  │  - m3u8 playlist parse│             │  - Timestamp sync    │  │
+│  │  - Subtitle extract   │             │  - In-room chat      │  │
+│  └───────────┬───────────┘             └──────────┬───────────┘  │
+└──────────────┼────────────────────────────────────┼──────────────┘
+               │                                    │
+               ▼                                    ▼
+┌───────────────────────────────┐    ┌─────────────────────────────┐
+│      SUPABASE POSTGRESQL      │    │    ONLINE CLOUD CI/CD       │
+│  - Users & JWT authentication │    │  - GitHub Actions APK build │
+│  - Watch History & Resume     │    │  - Compiles release APK     │
+│  - Favorite lists             │    │  - 0 disk space on local PC │
+└───────────────────────────────┘    └─────────────────────────────┘
 ```
 
 ---
 
 ## 2. Component Specifications
 
-### A. Dedicated Infrastructure (Oracle Cloud Always Free)
-* **Compute**: Ampere A1 ARM (up to 4 OCPUs, 24 GB RAM) or AMD Compute VM.
-* **Storage**: 200 GB NVMe block storage.
-* **Networking**: 10 TB free monthly bandwidth, dedicated public IPv4 address.
-* **Continuous Uptime**: Native Linux server running 24/7 with zero sleep or cold-start latency.
+### A. Infrastructure & Networking
+* **Backend Host**: High-performance local Go service listening on `:8080`.
+* **Public Tunnel**: `https://nuclei-oil-modular.ngrok-free.dev` providing global HTTPS & WSS access.
+* **Header Bypass**: `ngrok-skip-browser-warning: true` injected on all Flutter client API & WebSocket handshakes.
 
 ### B. Backend Service (Go)
 * **Framework**: Go with Fiber.
-* **Binary Size**: ~15–20 MB single static executable. Zero external runtimes or Docker required.
-* **RAM Usage**: ~20 MB idle, <50 MB under active multi-room load.
+* **Memory Footprint**: ~25 MB RAM.
 * **Scraper Engine**:
   * Utilizes `goquery` for DOM parsing and `crypto/aes` for decrypting stream manifests from embed hosts.
   * Resolves master `.m3u8` playlists, direct quality tracks (1080p, 720p, 480p), and subtitle tracks (`.vtt` / `.srt`).
@@ -64,10 +61,14 @@ Watch2Gether is a full-stack, cross-platform media streaming and synchronized vi
   * Manages active rooms keyed by 6-character alphanumeric codes (e.g., `W2G-941`).
   * Enforces a 200ms future timestamp broadcast window to compensate for client-to-server transit latency.
 
-### C. Database (Native PostgreSQL on VM)
-* Runs directly on the Oracle VM alongside the Go binary.
-* Eliminates third-party API quotas, sleep timers, and internet network hops.
+### C. Database & Auth (Supabase)
+* **PostgreSQL Schema**:
+  * `profiles`: User identification, username, avatar URL.
+  * `watch_history`: Media ID, episode/season, progress in seconds, last watched timestamp.
+  * `room_logs`: Historical session records.
+* **IPv4 Pooler**: Connects via `aws-0-ap-southeast-1.pooler.supabase.com:6543`.
 
 ### D. Frontend Client (Flutter + media_kit)
 * Hardware-accelerated decoding via `libmpv`.
 * Clean, non-AI-slop interface with native desktop mouse behaviors and mobile touch ergonomics.
+* GitHub Actions workflow builds Android release APKs online for free without needing local Android Studio.
