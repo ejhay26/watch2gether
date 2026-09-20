@@ -6,6 +6,7 @@ TODO*.md
 # Environment Variables & Secrets
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 
