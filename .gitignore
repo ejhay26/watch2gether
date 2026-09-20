@@ -1,0 +1,45 @@
+# Ralph Loop Local Backlog (Strictly Local)
+TODO.md
+TODO*.md
+*.local.md
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Go Artifacts
+backend/bin/
+backend/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+backend/vendor/
+
+# Flutter & Dart Build Artifacts
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/.pub-cache/
+frontend/.pub/
+frontend/build/
+frontend/android/app/build/
+frontend/ios/Pods/
+frontend/windows/flutter/ephemeral/
+frontend/linux/flutter/ephemeral/
+frontend/macos/Pods/
+
+# IDE & Operating System
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
