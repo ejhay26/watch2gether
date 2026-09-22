@@ -4,6 +4,9 @@ import '../constants/theme.dart';
 import '../models/media_item.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import 'auth/auth_modal.dart';
+import 'auth/profile_dialog.dart';
+import 'media/media_overview_modal.dart';
 import 'player/player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -67,66 +70,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _playMedia(MediaItem item, {bool createRoom = false}) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(
-        child: CircularProgressIndicator(color: AppColors.accent),
-      ),
-    );
-
-    try {
-      // 1. Get episodes
-      final eps = await _api.getEpisodes(item.id);
-      final epId = eps.isNotEmpty ? eps[0].id : item.id;
-
-      // 2. Get servers
-      final srvs = await _api.getServers(epId);
-      final srvId = srvs.isNotEmpty ? srvs[0].id : epId;
-
-      // 3. Get stream sources
-      final streamRes = await _api.getSources(srvId);
-      final streamUrl = streamRes != null && streamRes.sources.isNotEmpty
-          ? streamRes.sources[0].url
-          : "https://test-streams.mux.dev/tos_full/master.m3u8";
-
-      if (!mounted) return;
-      Navigator.of(context).pop(); // Dismiss loading
-
-      String? roomCode;
-      if (createRoom) {
-        roomCode = await _api.createRoom(
-          mediaId: item.id,
-          title: item.title,
-          streamUrl: streamUrl,
-          episodeId: epId,
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PlayerScreen(
-            title: item.title,
-            subtitle: eps.isNotEmpty ? eps[0].title : null,
-            streamUrl: streamUrl,
-            mediaId: item.id,
-            episodeId: epId,
-            initialRoomCode: roomCode,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load stream: $e')),
-        );
-      }
-    }
-  }
-
   void _showJoinRoomDialog() {
     final controller = TextEditingController();
     showDialog(
@@ -184,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         title: room.title,
                         streamUrl: room.streamUrl.isNotEmpty
                             ? room.streamUrl
-                            : "https://test-streams.mux.dev/tos_full/master.m3u8",
+                            : "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
                         mediaId: room.mediaId,
                         episodeId: room.episodeId,
                         initialRoomCode: code,
@@ -193,7 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Room not found')),
+                    const SnackBar(content: Text('Room not found or expired')),
                   );
                 }
               }
@@ -216,21 +159,26 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: AppColors.accent,
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: const Text(
-                'W2G',
-                style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 14),
+                'WATCHHUB',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                  letterSpacing: 1.5,
+                ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             const Text(
-              'WATCH2GETHER',
+              'STREAMING THEATER',
               style: TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 16,
-                letterSpacing: 0.5,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                letterSpacing: 0.8,
               ),
             ),
           ],
@@ -238,39 +186,75 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           // Join Room Button
           OutlinedButton.icon(
-            icon: const Icon(Icons.meeting_room_outlined, size: 16, color: AppColors.accent),
-            label: const Text('Join Room', style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
             style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.accent),
+              foregroundColor: AppColors.accent,
+              side: BorderSide(color: AppColors.accent.withOpacity(0.5)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             ),
+            icon: const Icon(Icons.meeting_room_rounded, size: 18),
+            label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             onPressed: _showJoinRoomDialog,
           ),
           const SizedBox(width: 12),
-          // User Badge
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.surfaceElevated,
-              child: Text(
-                auth.username != null && auth.username!.isNotEmpty ? auth.username![0].toUpperCase() : 'U',
-                style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 13),
+
+          // User Account Button
+          if (auth.isAuthenticated)
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => ProfileDialog.show(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.surfaceBorder),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundColor: AppColors.accent,
+                      child: Text(
+                        (auth.username ?? 'U')[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      auth.username ?? 'User',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
+            )
+          else
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.surfaceElevated,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              ),
+              icon: const Icon(Icons.person_outline, size: 18),
+              label: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              onPressed: () => AuthModal.show(context),
             ),
-          ),
+
+          const SizedBox(width: 16),
         ],
       ),
       body: Column(
         children: [
-          // Search Header
+          // Search Bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
             child: TextField(
               controller: _searchController,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: 'Search movies, open cinema, documentaries...',
+                hintText: 'Search movies, TV series, anime, open cinema...',
                 prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -286,7 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Content
+          // Content Area
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
@@ -332,8 +316,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMediaCard(MediaItem item) {
+    final ratingSrc = item.ratingSource ?? 'TMDB';
+    final rating = item.rating ?? '7.5';
+
     return InkWell(
-      onTap: () => _playMedia(item),
+      onTap: () => MediaOverviewModal.show(context, item),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         decoration: BoxDecoration(
@@ -371,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.transparent, Color(0xCC000000)],
+                          colors: [Colors.transparent, Colors.transparent, Color(0xDD000000)],
                         ),
                       ),
                     ),
@@ -385,14 +372,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.8),
+                          color: Colors.black.withOpacity(0.75),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: AppColors.surfaceBorder),
+                          border: Border.all(color: Colors.white24),
                         ),
                         child: Text(
                           item.quality!,
                           style: const TextStyle(
-                            color: AppColors.accent,
+                            color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                           ),
@@ -400,25 +387,43 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
 
-                  // Quick Play & Watch Together Button on Hover / Bottom
+                  // Rating badge (top left)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$ratingSrc $rating',
+                            style: const TextStyle(
+                              color: Colors.amber,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Play Button hint
                   Positioned(
                     bottom: 8,
-                    left: 8,
                     right: 8,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        CircleAvatar(
-                          radius: 14,
-                          backgroundColor: AppColors.accent,
-                          child: const Icon(Icons.play_arrow, color: Colors.black, size: 16),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.group_add, color: Colors.white, size: 20),
-                          tooltip: 'Start Watch Room',
-                          onPressed: () => _playMedia(item, createRoom: true),
-                        ),
-                      ],
+                    child: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppColors.accent,
+                      child: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 18),
                     ),
                   ),
                 ],
@@ -449,11 +454,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           item.year!,
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                         ),
-                      if (item.duration != null) ...[
+                      if (item.duration != null && item.duration!.isNotEmpty) ...[
                         const SizedBox(width: 6),
                         Text(
-                          '• ${item.duration!}',
+                          item.duration!,
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                        ),
+                      ] else if (item.type == 'tv') ...[
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Series',
+                          style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ],
@@ -467,4 +478,3 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-

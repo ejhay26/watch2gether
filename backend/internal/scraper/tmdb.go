@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -125,7 +124,7 @@ func (t *TMDBScraper) Search(query string) ([]MediaItem, error) {
 
 		overview := item.Overview
 		if overview == "" {
-			overview = fmt.Sprintf("Stream %s in Ultra HD on Watch2Gether.", title)
+			overview = fmt.Sprintf("Stream %s in Ultra HD on WatchHub.", title)
 		}
 
 		rating := "7.5"
@@ -134,15 +133,16 @@ func (t *TMDBScraper) Search(query string) ([]MediaItem, error) {
 		}
 
 		items = append(items, MediaItem{
-			ID:       fmt.Sprintf("tmdb-%s-%d", mType, item.ID),
-			Title:    title,
-			Type:     mType,
-			Poster:   poster,
-			Banner:   banner,
-			Year:     year,
-			Rating:   rating,
-			Quality:  "1080p HD",
-			Overview: overview,
+			ID:           fmt.Sprintf("tmdb-%s-%d", mType, item.ID),
+			Title:        title,
+			Type:         mType,
+			Poster:       poster,
+			Banner:       banner,
+			Year:         year,
+			Rating:       rating,
+			RatingSource: "TMDB",
+			Quality:      "1080p HD",
+			Overview:     overview,
 		})
 	}
 
@@ -211,7 +211,7 @@ func (t *TMDBScraper) GetTrending() ([]MediaItem, error) {
 
 		overview := item.Overview
 		if overview == "" {
-			overview = fmt.Sprintf("Stream %s in Ultra HD on Watch2Gether.", title)
+			overview = fmt.Sprintf("Stream %s in Ultra HD on WatchHub.", title)
 		}
 
 		rating := "8.0"
@@ -220,15 +220,16 @@ func (t *TMDBScraper) GetTrending() ([]MediaItem, error) {
 		}
 
 		items = append(items, MediaItem{
-			ID:       fmt.Sprintf("tmdb-%s-%d", mType, item.ID),
-			Title:    title,
-			Type:     mType,
-			Poster:   poster,
-			Banner:   banner,
-			Year:     year,
-			Rating:   rating,
-			Quality:  "1080p HD",
-			Overview: overview,
+			ID:           fmt.Sprintf("tmdb-%s-%d", mType, item.ID),
+			Title:        title,
+			Type:         mType,
+			Poster:       poster,
+			Banner:       banner,
+			Year:         year,
+			Rating:       rating,
+			RatingSource: "TMDB",
+			Quality:      "1080p HD",
+			Overview:     overview,
 		})
 	}
 
@@ -291,18 +292,22 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 
 	var seasons []int
 	numSeasons := detailsRaw.NumberOfSeasons
-	if numSeasons < 1 {
-		numSeasons = 1
-	}
-	for i := 1; i <= numSeasons; i++ {
-		seasons = append(seasons, i)
+	if mType == "tv" {
+		if numSeasons < 1 {
+			numSeasons = 1
+		}
+		for i := 1; i <= numSeasons; i++ {
+			seasons = append(seasons, i)
+		}
 	}
 
 	duration := ""
-	if detailsRaw.Runtime > 0 {
-		duration = fmt.Sprintf("%dh %dm", detailsRaw.Runtime/60, detailsRaw.Runtime%60)
-	} else if mType == "tv" {
-		duration = fmt.Sprintf("%d Seasons", numSeasons)
+	if mType == "movie" {
+		if detailsRaw.Runtime > 0 {
+			duration = fmt.Sprintf("%dh %dm", detailsRaw.Runtime/60, detailsRaw.Runtime%60)
+		} else {
+			duration = "1h 45m"
+		}
 	}
 
 	poster := ""
@@ -321,7 +326,7 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 
 	overview := detailsRaw.Overview
 	if overview == "" {
-		overview = fmt.Sprintf("Stream %s in Ultra HD on Watch2Gether.", title)
+		overview = fmt.Sprintf("Stream %s in Ultra HD on WatchHub.", title)
 	}
 
 	rating := "8.0"
@@ -331,16 +336,17 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 
 	return &MediaDetails{
 		MediaItem: MediaItem{
-			ID:       id,
-			Title:    title,
-			Type:     MediaType(mType),
-			Poster:   poster,
-			Banner:   banner,
-			Year:     year,
-			Rating:   rating,
-			Quality:  "1080p HD",
-			Duration: duration,
-			Overview: overview,
+			ID:           id,
+			Title:        title,
+			Type:         MediaType(mType),
+			Poster:       poster,
+			Banner:       banner,
+			Year:         year,
+			Rating:       rating,
+			RatingSource: "TMDB",
+			Quality:      "1080p HD",
+			Duration:     duration,
+			Overview:     overview,
 		},
 		Genres:  genres,
 		Seasons: seasons,
@@ -359,10 +365,11 @@ func (t *TMDBScraper) GetEpisodes(id string, season int) ([]Episode, error) {
 	if mType == "movie" {
 		return []Episode{
 			{
-				ID:     fmt.Sprintf("%s-ep1", id),
-				Number: 1,
-				Season: 1,
-				Title:  "Full Movie",
+				ID:       fmt.Sprintf("%s-ep1", id),
+				Number:   1,
+				Season:   1,
+				Title:    "Full Movie",
+				Overview: "Play feature presentation.",
 			},
 		}, nil
 	}
@@ -380,6 +387,7 @@ func (t *TMDBScraper) GetEpisodes(id string, season int) ([]Episode, error) {
 			ID            int    `json:"id"`
 			EpisodeNumber int    `json:"episode_number"`
 			Name          string `json:"name"`
+			Overview      string `json:"overview"`
 		} `json:"episodes"`
 	}
 
@@ -393,20 +401,26 @@ func (t *TMDBScraper) GetEpisodes(id string, season int) ([]Episode, error) {
 		if name == "" {
 			name = fmt.Sprintf("Episode %d", ep.EpisodeNumber)
 		}
+		overview := ep.Overview
+		if overview == "" {
+			overview = fmt.Sprintf("Episode %d of Season %d.", ep.EpisodeNumber, season)
+		}
 		episodes = append(episodes, Episode{
-			ID:     fmt.Sprintf("%s-s%d-e%d", id, season, ep.EpisodeNumber),
-			Number: ep.EpisodeNumber,
-			Season: season,
-			Title:  name,
+			ID:       fmt.Sprintf("%s-s%d-e%d", id, season, ep.EpisodeNumber),
+			Number:   ep.EpisodeNumber,
+			Season:   season,
+			Title:    name,
+			Overview: overview,
 		})
 	}
 
 	if len(episodes) == 0 {
 		episodes = append(episodes, Episode{
-			ID:     fmt.Sprintf("%s-s%d-e1", id, season),
-			Number: 1,
-			Season: season,
-			Title:  "Episode 1",
+			ID:       fmt.Sprintf("%s-s%d-e1", id, season),
+			Number:   1,
+			Season:   season,
+			Title:    "Episode 1",
+			Overview: "Premiere episode.",
 		})
 	}
 
@@ -417,85 +431,59 @@ func (t *TMDBScraper) GetServers(episodeId string) ([]Server, error) {
 	return []Server{
 		{
 			ID:   fmt.Sprintf("%s-srv-master", episodeId),
-			Name: "AutoEmbed Master (1080p HLS)",
-		},
-		{
-			ID:   fmt.Sprintf("%s-srv-vidsrc", episodeId),
-			Name: "VidSrc Stream Mirror",
+			Name: "AutoEmbed Master HLS (Multi-Dub)",
 		},
 		{
 			ID:   fmt.Sprintf("%s-srv-fastcdn", episodeId),
-			Name: "FastCDN Adaptive Multi-Bitrate",
+			Name: "FastCDN Adaptive 1080p",
+		},
+		{
+			ID:   fmt.Sprintf("%s-srv-apple", episodeId),
+			Name: "Apple CDN Multi-Language Stream",
+		},
+		{
+			ID:   fmt.Sprintf("%s-srv-mirror", episodeId),
+			Name: "High-Bitrate Direct Archive",
 		},
 	}, nil
 }
 
 func (t *TMDBScraper) GetStream(serverId string) (*StreamResult, error) {
-	parts := strings.Split(serverId, "-")
-	mType := "movie"
-	tmdbID := "19995"
-	season := 1
-	episode := 1
-
-	for i, p := range parts {
-		if p == "movie" && i+1 < len(parts) {
-			mType = "movie"
-			tmdbID = parts[i+1]
-		} else if p == "tv" && i+1 < len(parts) {
-			mType = "tv"
-			tmdbID = parts[i+1]
-		}
-	}
-
-	for _, p := range parts {
-		if strings.HasPrefix(p, "s") && len(p) > 1 {
-			if s, err := strconv.Atoi(p[1:]); err == nil {
-				season = s
-			}
-		}
-		if strings.HasPrefix(p, "e") && len(p) > 1 {
-			if e, err := strconv.Atoi(p[1:]); err == nil {
-				episode = e
-			}
-		}
-	}
-
-	var sources []Source
-	if mType == "movie" {
-		sources = []Source{
-			{
-				URL:     fmt.Sprintf("https://test-streams.mux.dev/tos_full/master.m3u8?tmdb=%s", tmdbID),
-				Quality: "Auto (1080p HLS)",
-				IsM3U8:  true,
-			},
-			{
-				URL:     fmt.Sprintf("https://bitmovin-a.akamaihd.net/content/sintel/hls/playlist.m3u8?tmdb=%s", tmdbID),
-				Quality: "Backup Mirror (HLS)",
-				IsM3U8:  true,
-			},
-		}
-	} else {
-		sources = []Source{
-			{
-				URL:     fmt.Sprintf("https://test-streams.mux.dev/tos_full/master.m3u8?tmdb=%s&s=%d&e=%d", tmdbID, season, episode),
-				Quality: "Auto (1080p HLS)",
-				IsM3U8:  true,
-			},
-		}
+	sources := []Source{
+		{
+			URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
+			Quality: "Auto (1080p HLS Adaptive)",
+			IsM3U8:  true,
+		},
+		{
+			URL:     "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
+			Quality: "FastCDN 1080p Mirror",
+			IsM3U8:  true,
+		},
+		{
+			URL:     "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
+			Quality: "Apple HLS Multi-Dub",
+			IsM3U8:  true,
+		},
+		{
+			URL:     "https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4",
+			Quality: "Direct MP4 Backup",
+			IsM3U8:  false,
+		},
 	}
 
 	subs := []Subtitle{
-		{URL: "https://bitdash-a.akamaihd.net/content/sintel/subtitles/subtitles_en.vtt", Lang: "English"},
-		{URL: "https://bitdash-a.akamaihd.net/content/sintel/subtitles/subtitles_de.vtt", Lang: "German"},
-		{URL: "https://bitdash-a.akamaihd.net/content/sintel/subtitles/subtitles_es.vtt", Lang: "Spanish"},
-		{URL: "https://bitdash-a.akamaihd.net/content/sintel/subtitles/subtitles_fr.vtt", Lang: "French"},
+		{URL: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel-en.vtt", Lang: "English"},
+		{URL: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel-de.vtt", Lang: "German"},
+		{URL: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel-es.vtt", Lang: "Spanish"},
+		{URL: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel-fr.vtt", Lang: "French"},
 	}
 
 	return &StreamResult{
 		Sources:   sources,
 		Subtitles: subs,
 		Headers: map[string]string{
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Watch2Gether/1.0",
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WatchHub/1.0",
 		},
 	}, nil
 }

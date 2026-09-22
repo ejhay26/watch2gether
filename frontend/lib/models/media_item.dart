@@ -6,9 +6,12 @@ class MediaItem {
   final String? banner;
   final String? year;
   final String? rating;
+  final String? ratingSource;
   final String? quality;
   final String? duration;
   final String? overview;
+  final List<String>? genres;
+  final List<int>? seasons;
 
   MediaItem({
     required this.id,
@@ -18,9 +21,12 @@ class MediaItem {
     this.banner,
     this.year,
     this.rating,
+    this.ratingSource,
     this.quality,
     this.duration,
     this.overview,
+    this.genres,
+    this.seasons,
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
@@ -32,9 +38,12 @@ class MediaItem {
       banner: json['banner'],
       year: json['year'],
       rating: json['rating'],
-      quality: json['quality'],
+      ratingSource: json['rating_source'] ?? 'TMDB',
+      quality: json['quality'] ?? '1080p HD',
       duration: json['duration'],
       overview: json['overview'],
+      genres: (json['genres'] as List<dynamic>?)?.map((e) => e.toString()).toList(),
+      seasons: (json['seasons'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList(),
     );
   }
 }
@@ -44,12 +53,14 @@ class Episode {
   final int number;
   final int season;
   final String title;
+  final String? overview;
 
   Episode({
     required this.id,
     required this.number,
     required this.season,
     required this.title,
+    this.overview,
   });
 
   factory Episode.fromJson(Map<String, dynamic> json) {
@@ -58,6 +69,7 @@ class Episode {
       number: json['number'] ?? 1,
       season: json['season'] ?? 1,
       title: json['title'] ?? '',
+      overview: json['overview'],
     );
   }
 }

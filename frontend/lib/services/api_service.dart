@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../models/media_item.dart';
 import '../models/room_models.dart';
+import '../models/user_model.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -49,6 +50,60 @@ class ApiService {
     _authToken = token;
   }
 
+  // --- Auth Endpoints ---
+  Future<Map<String, dynamic>?> login({
+    required String username,
+    required String password,
+  }) async {
+    try {
+      final res = await _dio.post('/api/v1/auth/login', data: {
+        'username': username,
+        'password': password,
+      });
+      return res.data as Map<String, dynamic>?;
+    } on DioException catch (e) {
+      final errorMsg = e.response?.data?['error'] ?? 'Login failed';
+      throw Exception(errorMsg);
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+
+  Future<Map<String, dynamic>?> register({
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final res = await _dio.post('/api/v1/auth/register', data: {
+        'username': username,
+        'email': email,
+        'password': password,
+      });
+      return res.data as Map<String, dynamic>?;
+    } on DioException catch (e) {
+      final errorMsg = e.response?.data?['error'] ?? 'Registration failed';
+      throw Exception(errorMsg);
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+
+  Future<UserModel?> getMe() async {
+    if (_authToken == null) return null;
+    try {
+      final res = await _dio.get('/api/v1/auth/me');
+      final userData = res.data['user'];
+      if (userData != null) {
+        return UserModel.fromJson(userData);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // --- Media & Catalog Endpoints ---
   Future<List<MediaItem>> getTrending() async {
     try {
       final res = await _dio.get('/api/v1/trending');
@@ -110,6 +165,7 @@ class ApiService {
     }
   }
 
+  // --- Watch Room Endpoints ---
   Future<String?> createRoom({
     required String mediaId,
     required String title,

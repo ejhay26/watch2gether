@@ -78,8 +78,8 @@ void main() {
     // Verify Title and Room Code are displayed
     expect(find.text('Sintel 4K'), findsOneWidget);
     expect(find.text('ROOM: XYZ789'), findsOneWidget);
-    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
-    expect(find.byIcon(Icons.forward_10), findsOneWidget);
-    expect(find.byIcon(Icons.replay_10), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.forward_10_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.replay_10_rounded), findsOneWidget);
   });
 }

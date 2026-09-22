@@ -8,31 +8,33 @@ const (
 )
 
 type MediaItem struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Type        MediaType `json:"type"`
-	Poster      string    `json:"poster"`
-	Banner      string    `json:"banner,omitempty"`
-	Year        string    `json:"year,omitempty"`
-	Rating      string    `json:"rating,omitempty"`
-	Quality     string    `json:"quality,omitempty"`
-	Duration    string    `json:"duration,omitempty"`
-	Overview    string    `json:"overview,omitempty"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Type         MediaType `json:"type"`
+	Poster       string    `json:"poster"`
+	Banner       string    `json:"banner,omitempty"`
+	Year         string    `json:"year,omitempty"`
+	Rating       string    `json:"rating,omitempty"`
+	RatingSource string    `json:"rating_source,omitempty"`
+	Quality      string    `json:"quality,omitempty"`
+	Duration     string    `json:"duration,omitempty"`
+	Overview     string    `json:"overview,omitempty"`
 }
 
 type MediaDetails struct {
 	MediaItem
-	Genres      []string  `json:"genres,omitempty"`
-	Cast        []string  `json:"cast,omitempty"`
-	Seasons     []int     `json:"seasons,omitempty"`
-	TotalEpisodes int     `json:"total_episodes,omitempty"`
+	Genres        []string  `json:"genres,omitempty"`
+	Cast          []string  `json:"cast,omitempty"`
+	Seasons       []int     `json:"seasons,omitempty"`
+	TotalEpisodes int       `json:"total_episodes,omitempty"`
 }
 
 type Episode struct {
-	ID     string `json:"id"`
-	Number int    `json:"number"`
-	Season int    `json:"season"`
-	Title  string `json:"title"`
+	ID       string `json:"id"`
+	Number   int    `json:"number"`
+	Season   int    `json:"season"`
+	Title    string `json:"title"`
+	Overview string `json:"overview,omitempty"`
 }
 
 type Server struct {

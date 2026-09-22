@@ -5,9 +5,12 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 
+import '../../constants/theme.dart';
+import '../../models/media_item.dart' hide SubtitleTrack;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/room_service.dart';
+import '../auth/auth_guard.dart';
 import 'desktop_hud.dart';
 import 'mobile_gestures.dart';
 import 'room_chat_drawer.dart';
@@ -19,6 +22,7 @@ class PlayerScreen extends StatefulWidget {
   final String mediaId;
   final String? episodeId;
   final String? initialRoomCode;
+  final StreamResult? streamResult;
 
   const PlayerScreen({
     super.key,
@@ -28,6 +32,7 @@ class PlayerScreen extends StatefulWidget {
     required this.mediaId,
     this.episodeId,
     this.initialRoomCode,
+    this.streamResult,
   });
 
   @override
@@ -38,35 +43,61 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
 
+  late String _currentStreamUrl;
+  String? _currentRoomCode;
+  String _currentQuality = 'Auto';
+  String _currentAudioTrack = 'Default';
+  String _currentSubtitle = 'Off';
+  List<String> _availableAudioTracks = [];
+
   Timer? _hideControlsTimer;
   Timer? _historyTimer;
   bool _controlsVisible = true;
   bool _isFullscreen = false;
   bool _isChatOpen = false;
+  bool _isBuffering = false;
 
   final FocusNode _keyboardFocusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
+    _currentStreamUrl = widget.streamUrl;
+    _currentRoomCode = widget.initialRoomCode;
 
     _player = Player();
     _controller = VideoController(_player);
 
-    _player.open(Media(widget.streamUrl));
+    _openMedia(_currentStreamUrl);
+
+    _player.stream.buffering.listen((buffering) {
+      if (mounted) setState(() => _isBuffering = buffering);
+    });
+
+    _player.stream.tracks.listen((tracks) {
+      if (mounted) {
+        setState(() {
+          _availableAudioTracks = tracks.audio.map((a) => a.language ?? a.title ?? 'Track').toList();
+        });
+      }
+    });
 
     _startHideControlsTimer();
     _initRoomAndSync();
     _startHistorySaving();
   }
 
+  void _openMedia(String url) {
+    _player.open(Media(url));
+  }
+
   void _initRoomAndSync() {
     final roomService = Provider.of<RoomService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
 
-    if (widget.initialRoomCode != null && widget.initialRoomCode!.isNotEmpty) {
+    if (_currentRoomCode != null && _currentRoomCode!.isNotEmpty) {
       roomService.connect(
-        roomId: widget.initialRoomCode!,
+        roomId: _currentRoomCode!,
         userId: authService.userId ?? 'user_${DateTime.now().millisecondsSinceEpoch}',
         username: authService.username ?? 'Viewer',
       );
@@ -97,6 +128,87 @@ class _PlayerScreenState extends State<PlayerScreen> {
     roomService.onSeekReceived = (position, executeAtMs) {
       _player.seek(Duration(milliseconds: (position * 1000).toInt()));
     };
+  }
+
+  void _switchSource(StreamSource source) {
+    final currentPos = _player.state.position;
+    setState(() {
+      _currentQuality = source.quality;
+      _currentStreamUrl = source.url;
+    });
+
+    _player.open(Media(source.url)).then((_) {
+      _player.seek(currentPos);
+      _player.play();
+    });
+  }
+
+  void _switchAudioTrack(String trackName) {
+    setState(() => _currentAudioTrack = trackName);
+    final tracks = _player.state.tracks.audio;
+    for (final t in tracks) {
+      if ((t.language != null && t.language!.toLowerCase() == trackName.toLowerCase()) ||
+          (t.title != null && t.title!.toLowerCase().contains(trackName.toLowerCase()))) {
+        _player.setAudioTrack(t);
+        return;
+      }
+    }
+  }
+
+  void _switchSubtitle(String sub) {
+    setState(() => _currentSubtitle = sub);
+    if (sub == 'Off') {
+      _player.setSubtitleTrack(SubtitleTrack.no());
+    } else {
+      final tracks = _player.state.tracks.subtitle;
+      for (final t in tracks) {
+        if ((t.language != null && t.language!.toLowerCase() == sub.toLowerCase()) ||
+            (t.title != null && t.title!.toLowerCase().contains(sub.toLowerCase()))) {
+          _player.setSubtitleTrack(t);
+          return;
+        }
+      }
+      if (widget.streamResult != null) {
+        for (final s in widget.streamResult!.subtitles) {
+          if (s.lang.toLowerCase() == sub.toLowerCase()) {
+            _player.setSubtitleTrack(SubtitleTrack.uri(s.url));
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _createRoomOnDemand() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    AuthGuard.runGuarded(
+      context,
+      message: 'Sign in to create a watch party and invite friends.',
+      onAuthorized: () async {
+        final roomCode = await ApiService().createRoom(
+          mediaId: widget.mediaId,
+          title: widget.title,
+          streamUrl: _currentStreamUrl,
+          episodeId: widget.episodeId ?? '',
+        );
+
+        if (roomCode != null && mounted) {
+          setState(() {
+            _currentRoomCode = roomCode;
+            _isChatOpen = true;
+          });
+          final roomService = Provider.of<RoomService>(context, listen: false);
+          roomService.connect(
+            roomId: roomCode,
+            userId: auth.userId ?? 'user_${DateTime.now().millisecondsSinceEpoch}',
+            username: auth.username ?? 'Host',
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Watch Room created! Code: $roomCode')),
+          );
+        }
+      },
+    );
   }
 
   void _startHistorySaving() {
@@ -199,6 +311,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final roomService = Provider.of<RoomService>(context);
+    final isRoomActive = roomService.isConnected || (_currentRoomCode != null && _currentRoomCode!.isNotEmpty);
 
     return KeyboardListener(
       focusNode: _keyboardFocusNode,
@@ -211,7 +324,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Row holding Video player + optional side-docked chat panel
+              // Row holding Video player + smoothly animated side-docked chat panel
               Row(
                 children: [
                   Expanded(
@@ -228,24 +341,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       onDoubleTapRight: () {
                         _seek(_player.state.position + const Duration(seconds: 10));
                       },
-                      child: Center(
-                        child: Video(
-                          controller: _controller,
-                          controls: NoVideoControls,
-                        ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Center(
+                            child: Video(
+                              controller: _controller,
+                              controls: NoVideoControls,
+                            ),
+                          ),
+
+                          // Buffering Indicator
+                          if (_isBuffering)
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const CircularProgressIndicator(
+                                color: AppColors.accent,
+                                strokeWidth: 3,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
 
-                  if (roomService.isConnected && _isChatOpen)
-                    RoomChatDrawer(
-                      roomService: roomService,
-                      onClose: () {
-                        setState(() {
-                          _isChatOpen = false;
-                        });
-                      },
+                  // Animated sliding Room Chat Drawer
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    width: isRoomActive && _isChatOpen ? 340 : 0,
+                    child: OverflowBox(
+                      minWidth: 340,
+                      maxWidth: 340,
+                      alignment: Alignment.topRight,
+                      child: isRoomActive
+                          ? RoomChatDrawer(
+                              roomService: roomService,
+                              onClose: () {
+                                setState(() {
+                                  _isChatOpen = false;
+                                });
+                              },
+                            )
+                          : const SizedBox.shrink(),
                     ),
+                  ),
                 ],
               ),
 
@@ -268,10 +412,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     volume: volume,
                     isMuted: volume == 0.0,
                     isFullscreen: _isFullscreen,
-                    isRoom: roomService.isConnected,
-                    roomCode: roomService.currentRoomId,
+                    isRoom: isRoomActive,
+                    roomCode: _currentRoomCode ?? roomService.currentRoomId,
                     participantCount: roomService.state?.participants.length ?? 1,
                     isChatOpen: _isChatOpen,
+                    streamResult: widget.streamResult,
+                    currentQuality: _currentQuality,
+                    currentAudioTrack: _currentAudioTrack,
+                    currentSubtitle: _currentSubtitle,
+                    availableAudioTracks: _availableAudioTracks,
                     onPlayPause: _togglePlayPause,
                     onSeek: _seek,
                     onVolumeChange: (val) {
@@ -293,6 +442,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       });
                     },
                     onBack: () => Navigator.of(context).pop(),
+                    onCreateRoom: _createRoomOnDemand,
+                    onSelectQuality: _switchSource,
+                    onSelectAudioTrack: _switchAudioTrack,
+                    onSelectSubtitle: _switchSubtitle,
                   );
                 },
               ),
@@ -303,4 +456,3 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 }
-

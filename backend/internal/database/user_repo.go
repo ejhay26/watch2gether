@@ -40,14 +40,19 @@ func (db *DB) CreateUser(ctx context.Context, username, email, password string) 
 }
 
 func (db *DB) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	return db.GetUserByUsernameOrEmail(ctx, username)
+}
+
+func (db *DB) GetUserByUsernameOrEmail(ctx context.Context, identifier string) (*User, error) {
 	query := `
 		SELECT id, username, email, password_hash, created_at
 		FROM users
-		WHERE LOWER(username) = LOWER($1)
+		WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)
+		LIMIT 1
 	`
 
 	var user User
-	err := db.Pool.QueryRow(ctx, query, username).Scan(
+	err := db.Pool.QueryRow(ctx, query, identifier).Scan(
 		&user.ID,
 		&user.Username,
 		&user.Email,
