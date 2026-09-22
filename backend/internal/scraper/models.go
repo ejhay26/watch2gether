@@ -1,64 +1,21 @@
 package scraper
 
-type MediaType string
+import "github.com/ejhay26/watch2gether/backend/internal/model"
+
+type MediaType = model.MediaType
 
 const (
-	MediaTypeMovie MediaType = "movie"
-	MediaTypeTV    MediaType = "tv"
+	MediaTypeMovie = model.MediaTypeMovie
+	MediaTypeTV    = model.MediaTypeTV
 )
 
-type MediaItem struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	Type         MediaType `json:"type"`
-	Poster       string    `json:"poster"`
-	Banner       string    `json:"banner,omitempty"`
-	Year         string    `json:"year,omitempty"`
-	Rating       string    `json:"rating,omitempty"`
-	RatingSource string    `json:"rating_source,omitempty"`
-	Quality      string    `json:"quality,omitempty"`
-	Duration     string    `json:"duration,omitempty"`
-	Overview     string    `json:"overview,omitempty"`
-}
-
-type MediaDetails struct {
-	MediaItem
-	Genres        []string  `json:"genres,omitempty"`
-	Cast          []string  `json:"cast,omitempty"`
-	Seasons       []int     `json:"seasons,omitempty"`
-	TotalEpisodes int       `json:"total_episodes,omitempty"`
-}
-
-type Episode struct {
-	ID       string `json:"id"`
-	Number   int    `json:"number"`
-	Season   int    `json:"season"`
-	Title    string `json:"title"`
-	Overview string `json:"overview,omitempty"`
-}
-
-type Server struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	ServerID int    `json:"server_id,omitempty"`
-}
-
-type Subtitle struct {
-	URL  string `json:"url"`
-	Lang string `json:"lang"`
-}
-
-type Source struct {
-	URL     string `json:"url"`
-	Quality string `json:"quality"`
-	IsM3U8  bool   `json:"is_m3u8"`
-}
-
-type StreamResult struct {
-	Sources   []Source          `json:"sources"`
-	Subtitles []Subtitle        `json:"subtitles"`
-	Headers   map[string]string `json:"headers,omitempty"`
-}
+type MediaItem = model.MediaItem
+type MediaDetails = model.MediaDetails
+type Episode = model.Episode
+type Server = model.Server
+type Subtitle = model.Subtitle
+type Source = model.Source
+type StreamResult = model.StreamResult
 
 type Scraper interface {
 	Search(query string) ([]MediaItem, error)

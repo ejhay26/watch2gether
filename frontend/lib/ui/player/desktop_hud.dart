@@ -13,6 +13,7 @@ class DesktopHUD extends StatelessWidget {
   final double volume;
   final bool isMuted;
   final bool isFullscreen;
+  final bool isMaximized;
   final bool isRoom;
   final String? roomCode;
   final int participantCount;
@@ -28,6 +29,7 @@ class DesktopHUD extends StatelessWidget {
   final ValueChanged<double> onVolumeChange;
   final VoidCallback onToggleMute;
   final VoidCallback onToggleFullscreen;
+  final VoidCallback? onToggleMaximize;
   final VoidCallback onToggleChat;
   final VoidCallback onBack;
   final VoidCallback? onCreateRoom;
@@ -46,6 +48,7 @@ class DesktopHUD extends StatelessWidget {
     required this.volume,
     required this.isMuted,
     required this.isFullscreen,
+    this.isMaximized = false,
     required this.isRoom,
     this.roomCode,
     required this.participantCount,
@@ -61,6 +64,7 @@ class DesktopHUD extends StatelessWidget {
     required this.onVolumeChange,
     required this.onToggleMute,
     required this.onToggleFullscreen,
+    this.onToggleMaximize,
     required this.onToggleChat,
     required this.onBack,
     this.onCreateRoom,
@@ -102,201 +106,219 @@ class DesktopHUD extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // TOP BAR
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-                      onPressed: onBack,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.3,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (subtitle != null && subtitle!.isNotEmpty)
+              // Top Bar
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+                        onPressed: onBack,
+                        tooltip: 'Back',
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              subtitle!,
-                              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                              title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                        ],
-                      ),
-                    ),
-
-                    // Room Indicator or "Watch Together" Button
-                    if (isRoom) ...[
-                      InkWell(
-                        onTap: () {
-                          if (roomCode != null) {
-                            Clipboard.setData(ClipboardData(text: roomCode!));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Room code $roomCode copied to clipboard!'),
-                                duration: const Duration(seconds: 2),
+                            if (subtitle != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle!,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.7),
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            );
-                          }
-                        },
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
+                            ],
+                          ],
+                        ),
+                      ),
+
+                      // Room Mode or Create Watch Party
+                      if (isRoom) ...[
+                        Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: AppColors.surfaceElevated,
+                            color: AppColors.surfaceElevated.withOpacity(0.85),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppColors.accent.withOpacity(0.4)),
+                            border: Border.all(color: AppColors.surfaceBorder),
                           ),
                           child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: AppColors.liveIndicator,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'ROOM: ${roomCode ?? ""}',
-                                style: const TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
+                              const Icon(Icons.people_alt_rounded, color: AppColors.accent, size: 16),
                               const SizedBox(width: 6),
-                              const Icon(Icons.copy, color: AppColors.textSecondary, size: 14),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.people_outline, color: AppColors.textSecondary, size: 16),
-                              const SizedBox(width: 4),
                               Text(
-                                '$participantCount',
-                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                                '$participantCount online',
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
                               ),
+                              if (roomCode != null) ...[
+                                const SizedBox(width: 8),
+                                InkWell(
+                                  onTap: () {
+                                    Clipboard.setData(ClipboardData(text: roomCode!));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Room code copied: $roomCode'),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.accent.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Text(
+                                          'ROOM: $roomCode',
+                                          style: const TextStyle(
+                                            color: AppColors.accent,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 1,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.copy_rounded, color: AppColors.accent, size: 12),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        icon: Icon(
-                          isChatOpen ? Icons.chat : Icons.chat_bubble_outline,
-                          color: isChatOpen ? AppColors.accent : Colors.white,
-                          size: 20,
+                        const SizedBox(width: 10),
+                        // Chat Drawer Toggle Button
+                        IconButton(
+                          icon: Icon(
+                            isChatOpen ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
+                            color: isChatOpen ? AppColors.accent : Colors.white,
+                            size: 20,
+                          ),
+                          tooltip: isChatOpen ? 'Close Chat' : 'Open Chat',
+                          onPressed: onToggleChat,
                         ),
-                        onPressed: onToggleChat,
-                      ),
-                    ] else if (onCreateRoom != null) ...[
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.accent,
-                          side: BorderSide(color: AppColors.accent.withOpacity(0.5)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      ] else ...[
+                        // Solo Mode: Button to initiate a room on demand
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.surfaceElevated.withOpacity(0.85),
+                            foregroundColor: AppColors.accent,
+                            side: const BorderSide(color: AppColors.accent, width: 1),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          ),
+                          icon: const Icon(Icons.group_add_rounded, size: 16),
+                          label: const Text(
+                            'Watch Together',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          onPressed: onCreateRoom,
                         ),
-                        icon: const Icon(Icons.group_add_rounded, size: 18),
-                        label: const Text(
-                          'Watch Together',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        onPressed: onCreateRoom,
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
 
-              // BOTTOM CONTROLS BAR
+              // Bottom Controls Bar
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Scrub Bar
+                    // Scrubber Bar
                     Row(
                       children: [
                         Text(
                           _formatDuration(position),
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: SliderTheme(
                             data: SliderThemeData(
                               trackHeight: 3,
                               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                               activeTrackColor: AppColors.accent,
-                              inactiveTrackColor: AppColors.surfaceBorder,
+                              inactiveTrackColor: Colors.white24,
                               thumbColor: AppColors.accent,
-                              overlayColor: AppColors.accentGlow,
+                              overlayColor: AppColors.accent.withOpacity(0.3),
                             ),
                             child: Slider(
                               value: duration.inMilliseconds > 0
                                   ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
                                   : 0.0,
                               onChanged: (val) {
-                                onSeek(Duration(milliseconds: (val * duration.inMilliseconds).toInt()));
+                                final targetMs = (val * duration.inMilliseconds).toInt();
+                                onSeek(Duration(milliseconds: targetMs));
                               },
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Text(
                           _formatDuration(duration),
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
                         ),
                       ],
                     ),
 
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
 
                     // Controls Row
                     Row(
                       children: [
+                        // Play/Pause
                         IconButton(
                           icon: Icon(
                             isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                             color: Colors.white,
-                            size: 30,
+                            size: 26,
                           ),
                           onPressed: onPlayPause,
                         ),
-                        const SizedBox(width: 4),
+
+                        // Replay 10s
                         IconButton(
-                          icon: const Icon(Icons.replay_10_rounded, color: Colors.white, size: 22),
+                          icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 20),
+                          tooltip: 'Rewind 10s',
                           onPressed: () {
                             final target = position - const Duration(seconds: 10);
                             onSeek(target < Duration.zero ? Duration.zero : target);
                           },
                         ),
+
+                        // Forward 10s
                         IconButton(
-                          icon: const Icon(Icons.forward_10_rounded, color: Colors.white, size: 22),
+                          icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 20),
+                          tooltip: 'Fast Forward 10s',
                           onPressed: () {
                             final target = position + const Duration(seconds: 10);
                             onSeek(target > duration ? duration : target);
                           },
                         ),
 
-                        const SizedBox(width: 16),
-
-                        // Volume Control
+                        // Volume Slider
                         IconButton(
                           icon: Icon(
                             isMuted || volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
@@ -332,9 +354,9 @@ class DesktopHUD extends StatelessWidget {
                           itemBuilder: (ctx) {
                             final tracks = availableAudioTracks.isNotEmpty
                                 ? availableAudioTracks
-                                : ['English (Default)', 'Spanish Dub', 'French Dub', 'German Dub', 'Japanese'];
+                                : ['Audio 1: English (Stereo)', 'Audio 2: Multi-Audio'];
                             return tracks.map((track) {
-                              final isSelected = track == currentAudioTrack || (currentAudioTrack == 'Default' && track.contains('Default'));
+                              final isSelected = track == currentAudioTrack || (currentAudioTrack == 'Default' && track.contains('1'));
                               return PopupMenuItem<String>(
                                 value: track,
                                 child: Row(
@@ -367,9 +389,11 @@ class DesktopHUD extends StatelessWidget {
                           icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 20),
                           color: const Color(0xFF1B1E28),
                           itemBuilder: (ctx) {
-                            final subs = ['Off', 'English', 'Spanish', 'French', 'German'];
+                            final subs = availableSubtitles.isNotEmpty
+                                ? availableSubtitles
+                                : ['Off', 'English [CC]', 'Spanish (Español)', 'French (Français)', 'German (Deutsch)'];
                             return subs.map((s) {
-                              final isSelected = s == currentSubtitle;
+                              final isSelected = s == currentSubtitle || (currentSubtitle == 'Off' && s == 'Off');
                               return PopupMenuItem<String>(
                                 value: s,
                                 child: Row(
@@ -396,15 +420,15 @@ class DesktopHUD extends StatelessWidget {
                           onSelected: onSelectSubtitle,
                         ),
 
-                        // Quality / Source Selector
+                        // Dynamic Quality & Sources Selector
                         if (streamResult != null && streamResult!.sources.isNotEmpty)
                           PopupMenuButton<StreamSource>(
-                            tooltip: 'Stream Quality & Sources',
+                            tooltip: 'Dynamic Sources & Quality',
                             icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
                             color: const Color(0xFF1B1E28),
                             itemBuilder: (ctx) {
                               return streamResult!.sources.map((src) {
-                                final isSelected = src.quality == currentQuality;
+                                final isSelected = src.quality == currentQuality || (currentQuality == 'Auto' && src == streamResult!.sources.first);
                                 return PopupMenuItem<StreamSource>(
                                   value: src,
                                   child: Row(
@@ -431,13 +455,26 @@ class DesktopHUD extends StatelessWidget {
                             onSelected: onSelectQuality,
                           ),
 
-                        // Fullscreen
+                        // Window Maximize / Unmaximize Toggle Button
+                        if (onToggleMaximize != null)
+                          IconButton(
+                            icon: Icon(
+                              isMaximized ? Icons.filter_none_rounded : Icons.crop_square_rounded,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
+                            tooltip: isMaximized ? 'Restore / Unmaximize Window' : 'Maximize Window',
+                            onPressed: onToggleMaximize,
+                          ),
+
+                        // Fullscreen Toggle Button
                         IconButton(
                           icon: Icon(
                             isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
                             color: Colors.white,
                             size: 24,
                           ),
+                          tooltip: isFullscreen ? 'Exit Fullscreen (F / Esc)' : 'Fullscreen (F)',
                           onPressed: onToggleFullscreen,
                         ),
                       ],

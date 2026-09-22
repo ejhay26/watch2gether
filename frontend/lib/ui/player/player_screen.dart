@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../../constants/theme.dart';
 import '../../models/media_item.dart' hide SubtitleTrack;
@@ -49,15 +52,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String _currentAudioTrack = 'Default';
   String _currentSubtitle = 'Off';
   List<String> _availableAudioTracks = [];
+  List<String> _availableSubtitles = ['Off'];
 
   Timer? _hideControlsTimer;
   Timer? _historyTimer;
   bool _controlsVisible = true;
   bool _isFullscreen = false;
+  bool _isMaximized = false;
   bool _isChatOpen = false;
   bool _isBuffering = false;
 
   final FocusNode _keyboardFocusNode = FocusNode();
+
+  bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   @override
   void initState() {
@@ -76,11 +83,63 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _player.stream.tracks.listen((tracks) {
       if (mounted) {
+        final audioList = <String>[];
+        for (int i = 0; i < tracks.audio.length; i++) {
+          final a = tracks.audio[i];
+          String lang = a.language ?? '';
+          String title = a.title ?? '';
+          if (title.isNotEmpty && title.toLowerCase() != 'track') {
+            audioList.add('Track ${i + 1}: $title');
+            continue;
+          }
+          String displayLang = lang.isNotEmpty ? lang.toUpperCase() : 'Audio';
+          if (lang.toLowerCase() == 'en' || lang.toLowerCase() == 'eng') {
+            displayLang = 'English';
+          } else if (lang.toLowerCase() == 'es' || lang.toLowerCase() == 'spa') {
+            displayLang = 'Spanish';
+          } else if (lang.toLowerCase() == 'fr' || lang.toLowerCase() == 'fra') {
+            displayLang = 'French';
+          } else if (lang.toLowerCase() == 'de' || lang.toLowerCase() == 'deu') {
+            displayLang = 'German';
+          } else if (lang.toLowerCase() == 'ja' || lang.toLowerCase() == 'jpn') {
+            displayLang = 'Japanese';
+          }
+
+          String ch = (a.channels != null && a.channels!.toString().isNotEmpty)
+              ? ' [${a.channels}]'
+              : '';
+          audioList.add('Track ${i + 1}: $displayLang$ch');
+        }
+
+        final subList = <String>['Off'];
+        for (int i = 0; i < tracks.subtitle.length; i++) {
+          final s = tracks.subtitle[i];
+          final lang = s.language ?? s.title ?? 'Subtitle ${i + 1}';
+          subList.add(lang);
+        }
+        if (widget.streamResult != null) {
+          for (final extSub in widget.streamResult!.subtitles) {
+            if (extSub.lang.isNotEmpty && !subList.contains(extSub.lang)) {
+              subList.add(extSub.lang);
+            }
+          }
+        }
+
         setState(() {
-          _availableAudioTracks = tracks.audio.map((a) => a.language ?? a.title ?? 'Track').toList();
+          _availableAudioTracks = audioList;
+          _availableSubtitles = subList;
         });
       }
     });
+
+    if (_isDesktop) {
+      windowManager.isMaximized().then((m) {
+        if (mounted) setState(() => _isMaximized = m);
+      });
+      windowManager.isFullScreen().then((f) {
+        if (mounted) setState(() => _isFullscreen = f);
+      });
+    }
 
     _startHideControlsTimer();
     _initRoomAndSync();
@@ -143,13 +202,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _switchAudioTrack(String trackName) {
-    setState(() => _currentAudioTrack = trackName);
+  void _switchAudioTrack(String trackLabel) {
+    setState(() => _currentAudioTrack = trackLabel);
     final tracks = _player.state.tracks.audio;
-    for (final t in tracks) {
-      if ((t.language != null && t.language!.toLowerCase() == trackName.toLowerCase()) ||
-          (t.title != null && t.title!.toLowerCase().contains(trackName.toLowerCase()))) {
-        _player.setAudioTrack(t);
+    for (int i = 0; i < _availableAudioTracks.length; i++) {
+      if (_availableAudioTracks[i] == trackLabel && i < tracks.length) {
+        _player.setAudioTrack(tracks[i]);
         return;
       }
     }
@@ -170,11 +228,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       if (widget.streamResult != null) {
         for (final s in widget.streamResult!.subtitles) {
-          if (s.lang.toLowerCase() == sub.toLowerCase()) {
+          if (s.lang.toLowerCase() == sub.toLowerCase() && s.url.isNotEmpty) {
             _player.setSubtitleTrack(SubtitleTrack.uri(s.url));
             return;
           }
         }
+      }
+    }
+  }
+
+  Future<void> _toggleFullscreen() async {
+    if (_isDesktop) {
+      final isFull = await windowManager.isFullScreen();
+      await windowManager.setFullScreen(!isFull);
+      if (mounted) setState(() => _isFullscreen = !isFull);
+    } else {
+      if (mounted) setState(() => _isFullscreen = !_isFullscreen);
+    }
+  }
+
+  Future<void> _toggleMaximize() async {
+    if (_isDesktop) {
+      final isMax = await windowManager.isMaximized();
+      if (isMax) {
+        await windowManager.unmaximize();
+        if (mounted) setState(() => _isMaximized = false);
+      } else {
+        await windowManager.maximize();
+        if (mounted) setState(() => _isMaximized = true);
       }
     }
   }
@@ -289,9 +370,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _player.setVolume((_player.state.volume - 10).clamp(0.0, 100.0));
         _onUserInteraction();
       } else if (event.logicalKey == LogicalKeyboardKey.keyF) {
-        setState(() {
-          _isFullscreen = !_isFullscreen;
-        });
+        _toggleFullscreen();
+      } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_isFullscreen) {
+          _toggleFullscreen();
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.keyM) {
         _player.setVolume(_player.state.volume > 0 ? 0.0 : 100.0);
         _onUserInteraction();
@@ -412,6 +495,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     volume: volume,
                     isMuted: volume == 0.0,
                     isFullscreen: _isFullscreen,
+                    isMaximized: _isMaximized,
                     isRoom: isRoomActive,
                     roomCode: _currentRoomCode ?? roomService.currentRoomId,
                     participantCount: roomService.state?.participants.length ?? 1,
@@ -421,6 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     currentAudioTrack: _currentAudioTrack,
                     currentSubtitle: _currentSubtitle,
                     availableAudioTracks: _availableAudioTracks,
+                    availableSubtitles: _availableSubtitles,
                     onPlayPause: _togglePlayPause,
                     onSeek: _seek,
                     onVolumeChange: (val) {
@@ -431,11 +516,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       _player.setVolume(volume > 0 ? 0.0 : 100.0);
                       _onUserInteraction();
                     },
-                    onToggleFullscreen: () {
-                      setState(() {
-                        _isFullscreen = !_isFullscreen;
-                      });
-                    },
+                    onToggleFullscreen: _toggleFullscreen,
+                    onToggleMaximize: _isDesktop ? _toggleMaximize : null,
                     onToggleChat: () {
                       setState(() {
                         _isChatOpen = !_isChatOpen;

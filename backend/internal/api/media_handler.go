@@ -116,8 +116,15 @@ func (h *MediaHandler) GetServers(c *fiber.Ctx) error {
 			"error": "Query parameter 'episodeId' is required",
 		})
 	}
+	title := c.Query("title")
 
-	servers, err := h.scraper.GetServers(episodeId)
+	var servers []scraper.Server
+	var err error
+	if mgr, ok := h.scraper.(*scraper.Manager); ok {
+		servers, err = mgr.GetServersWithTitle(episodeId, title)
+	} else {
+		servers, err = h.scraper.GetServers(episodeId)
+	}
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -135,8 +142,15 @@ func (h *MediaHandler) GetSources(c *fiber.Ctx) error {
 			"error": "Query parameter 'serverId' is required",
 		})
 	}
+	title := c.Query("title")
 
-	stream, err := h.scraper.GetStream(serverId)
+	var stream *scraper.StreamResult
+	var err error
+	if mgr, ok := h.scraper.(*scraper.Manager); ok {
+		stream, err = mgr.GetStreamWithTitle(serverId, title)
+	} else {
+		stream, err = h.scraper.GetStream(serverId)
+	}
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

@@ -1,121 +1,170 @@
 package scraper
 
 import (
+	"context"
 	"strings"
 	"time"
+
+	"github.com/ejhay26/watch2gether/backend/internal/engine/audio"
+	"github.com/ejhay26/watch2gether/backend/internal/engine/catalog"
+	"github.com/ejhay26/watch2gether/backend/internal/engine/subtitle"
+	"github.com/ejhay26/watch2gether/backend/internal/engine/video"
 )
 
 type Manager struct {
-	tmdb   *TMDBScraper
-	flixhq *FlixHQScraper
-	demo   *DemoProvider
+	catalogEngine  *catalog.CatalogEngine
+	videoEngine    *video.VideoEngine
+	subtitleEngine *subtitle.SubtitleEngine
+	audioEngine    *audio.AudioEngine
+	demo           *DemoProvider
+	flixhq         *FlixHQScraper
 }
 
 func NewManager(flixhqURL string) *Manager {
+	keys := []string{
+		"844dba0bfd8f3a4f3799f6130ef9e335",
+		"e9e9d8da18ae29fc430845952232787c",
+		"4113f36a3dce79e4deda2209210e3060",
+	}
+	ve := video.NewVideoEngine(keys)
+	ce := catalog.NewCatalogEngine(ve.GetArchiveProvider(), keys)
+	se := subtitle.NewSubtitleEngine()
+	ae := audio.NewAudioEngine()
+
 	return &Manager{
-		tmdb:   NewTMDBScraper(""),
-		flixhq: NewFlixHQScraper(flixhqURL),
-		demo:   NewDemoProvider(),
+		catalogEngine:  ce,
+		videoEngine:    ve,
+		subtitleEngine: se,
+		audioEngine:    ae,
+		demo:           NewDemoProvider(),
+		flixhq:         NewFlixHQScraper(flixhqURL),
 	}
 }
 
 func NewManagerWithProviders(flixhq *FlixHQScraper, demo *DemoProvider) *Manager {
-	return &Manager{
-		tmdb:   NewTMDBScraper(""),
-		flixhq: flixhq,
-		demo:   demo,
-	}
+	mgr := NewManager("")
+	mgr.flixhq = flixhq
+	mgr.demo = demo
+	return mgr
+}
+
+func (m *Manager) GetCatalogEngine() *catalog.CatalogEngine {
+	return m.catalogEngine
+}
+
+func (m *Manager) GetVideoEngine() *video.VideoEngine {
+	return m.videoEngine
+}
+
+func (m *Manager) GetSubtitleEngine() *subtitle.SubtitleEngine {
+	return m.subtitleEngine
+}
+
+func (m *Manager) GetAudioEngine() *audio.AudioEngine {
+	return m.audioEngine
 }
 
 func (m *Manager) Search(query string) ([]MediaItem, error) {
-	var combined []MediaItem
-	seen := make(map[string]bool)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	addItem := func(items []MediaItem) {
-		for _, item := range items {
-			if !seen[item.ID] && item.Title != "" {
-				seen[item.ID] = true
-				combined = append(combined, item)
+	results, err := m.catalogEngine.Search(ctx, query)
+	if err != nil {
+		results = []MediaItem{}
+	}
+
+	seen := make(map[string]bool)
+	var combined []MediaItem
+	for _, it := range results {
+		if !seen[it.ID] {
+			seen[it.ID] = true
+			combined = append(combined, it)
+		}
+	}
+
+	if m.demo != nil {
+		demoRes, _ := m.demo.Search(query)
+		for _, it := range demoRes {
+			if !seen[it.ID] {
+				seen[it.ID] = true
+				combined = append(combined, it)
 			}
 		}
 	}
 
-	// 1. Check Demo items (instant)
-	demoResults, _ := m.demo.Search(query)
-	addItem(demoResults)
+	// Non-blocking query to FlixHQ
+	if m.flixhq != nil {
+		ch := make(chan []MediaItem, 1)
+		go func() {
+			items, _ := m.flixhq.Search(query)
+			ch <- items
+		}()
 
-	// 2. Query TMDB (fast, reliable, global catalog)
-	tmdbResults, err := m.tmdb.Search(query)
-	if err == nil {
-		addItem(tmdbResults)
+		select {
+		case items := <-ch:
+			for _, it := range items {
+				if !seen[it.ID] {
+					seen[it.ID] = true
+					combined = append(combined, it)
+				}
+			}
+		case <-time.After(1200 * time.Millisecond):
+			// Timeout FlixHQ gracefully
+		}
 	}
 
-	// 3. Query FlixHQ concurrently with a short timeout so dead mirrors never block
-	type flixRes struct {
-		items []MediaItem
-	}
-	ch := make(chan flixRes, 1)
-	go func() {
-		res, _ := m.flixhq.Search(query)
-		ch <- flixRes{items: res}
-	}()
-
-	select {
-	case r := <-ch:
-		addItem(r.items)
-	case <-time.After(1500 * time.Millisecond):
-		// FlixHQ timed out, continue with TMDB and demo results
-	}
-
-	if combined == nil {
-		combined = []MediaItem{}
-	}
 	return combined, nil
 }
 
 func (m *Manager) GetTrending() ([]MediaItem, error) {
-	var combined []MediaItem
-	seen := make(map[string]bool)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	addItem := func(items []MediaItem) {
-		for _, item := range items {
-			if !seen[item.ID] && item.Title != "" {
-				seen[item.ID] = true
-				combined = append(combined, item)
+	results, err := m.catalogEngine.GetTrending(ctx)
+	if err != nil {
+		results = []MediaItem{}
+	}
+
+	seen := make(map[string]bool)
+	var combined []MediaItem
+	for _, it := range results {
+		if !seen[it.ID] {
+			seen[it.ID] = true
+			combined = append(combined, it)
+		}
+	}
+
+	if m.demo != nil {
+		demoTrending, _ := m.demo.GetTrending()
+		for _, it := range demoTrending {
+			if !seen[it.ID] {
+				seen[it.ID] = true
+				combined = append(combined, it)
 			}
 		}
 	}
 
-	// 1. Fetch TMDB Trending
-	tmdbTrending, err := m.tmdb.GetTrending()
-	if err == nil && len(tmdbTrending) > 0 {
-		addItem(tmdbTrending)
+	// Non-blocking query to FlixHQ
+	if m.flixhq != nil {
+		ch := make(chan []MediaItem, 1)
+		go func() {
+			items, _ := m.flixhq.GetTrending()
+			ch <- items
+		}()
+
+		select {
+		case items := <-ch:
+			for _, it := range items {
+				if !seen[it.ID] {
+					seen[it.ID] = true
+					combined = append(combined, it)
+				}
+			}
+		case <-time.After(1200 * time.Millisecond):
+			// Timeout FlixHQ gracefully
+		}
 	}
 
-	// 2. Append Open Media Demo Items
-	demoTrending, _ := m.demo.GetTrending()
-	addItem(demoTrending)
-
-	// 3. Query FlixHQ concurrently with short timeout
-	type flixRes struct {
-		items []MediaItem
-	}
-	ch := make(chan flixRes, 1)
-	go func() {
-		res, _ := m.flixhq.GetTrending()
-		ch <- flixRes{items: res}
-	}()
-
-	select {
-	case r := <-ch:
-		addItem(r.items)
-	case <-time.After(1500 * time.Millisecond):
-		// FlixHQ timed out, continue with TMDB and demo results
-	}
-
-	if combined == nil {
-		combined = []MediaItem{}
-	}
 	return combined, nil
 }
 
@@ -124,7 +173,9 @@ func (m *Manager) GetDetails(id string) (*MediaDetails, error) {
 		return m.demo.GetDetails(id)
 	}
 	if strings.HasPrefix(id, "tmdb-") {
-		return m.tmdb.GetDetails(id)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return m.catalogEngine.GetDetails(ctx, id)
 	}
 	return m.flixhq.GetDetails(id)
 }
@@ -134,7 +185,9 @@ func (m *Manager) GetEpisodes(id string, season int) ([]Episode, error) {
 		return m.demo.GetEpisodes(id, season)
 	}
 	if strings.HasPrefix(id, "tmdb-") {
-		return m.tmdb.GetEpisodes(id, season)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return m.catalogEngine.GetEpisodes(ctx, id, season)
 	}
 	return m.flixhq.GetEpisodes(id, season)
 }
@@ -144,7 +197,17 @@ func (m *Manager) GetServers(episodeId string) ([]Server, error) {
 		return m.demo.GetServers(episodeId)
 	}
 	if strings.HasPrefix(episodeId, "tmdb-") {
-		return m.tmdb.GetServers(episodeId)
+		return m.videoEngine.GetServers(episodeId, "")
+	}
+	return m.flixhq.GetServers(episodeId)
+}
+
+func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server, error) {
+	if strings.HasPrefix(episodeId, "demo-") {
+		return m.demo.GetServers(episodeId)
+	}
+	if strings.HasPrefix(episodeId, "tmdb-") {
+		return m.videoEngine.GetServers(episodeId, title)
 	}
 	return m.flixhq.GetServers(episodeId)
 }
@@ -154,7 +217,43 @@ func (m *Manager) GetStream(serverId string) (*StreamResult, error) {
 		return m.demo.GetStream(serverId)
 	}
 	if strings.HasPrefix(serverId, "tmdb-") {
-		return m.tmdb.GetStream(serverId)
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+
+		stream, err := m.videoEngine.GetStream(ctx, serverId, "")
+		if err != nil {
+			return nil, err
+		}
+
+		if len(stream.Subtitles) == 0 {
+			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, "")
+			stream.Subtitles = subs
+		}
+
+		return stream, nil
+	}
+	return m.flixhq.GetStream(serverId)
+}
+
+func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResult, error) {
+	if strings.HasPrefix(serverId, "demo-") {
+		return m.demo.GetStream(serverId)
+	}
+	if strings.HasPrefix(serverId, "tmdb-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+
+		stream, err := m.videoEngine.GetStream(ctx, serverId, title)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(stream.Subtitles) == 0 {
+			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
+			stream.Subtitles = subs
+		}
+
+		return stream, nil
 	}
 	return m.flixhq.GetStream(serverId)
 }
