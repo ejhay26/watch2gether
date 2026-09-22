@@ -13,7 +13,6 @@ class DesktopHUD extends StatelessWidget {
   final double volume;
   final bool isMuted;
   final bool isFullscreen;
-  final bool isMaximized;
   final bool isRoom;
   final String? roomCode;
   final int participantCount;
@@ -29,7 +28,6 @@ class DesktopHUD extends StatelessWidget {
   final ValueChanged<double> onVolumeChange;
   final VoidCallback onToggleMute;
   final VoidCallback onToggleFullscreen;
-  final VoidCallback? onToggleMaximize;
   final VoidCallback onToggleChat;
   final VoidCallback onBack;
   final VoidCallback? onCreateRoom;
@@ -48,7 +46,6 @@ class DesktopHUD extends StatelessWidget {
     required this.volume,
     required this.isMuted,
     required this.isFullscreen,
-    this.isMaximized = false,
     required this.isRoom,
     this.roomCode,
     required this.participantCount,
@@ -64,7 +61,6 @@ class DesktopHUD extends StatelessWidget {
     required this.onVolumeChange,
     required this.onToggleMute,
     required this.onToggleFullscreen,
-    this.onToggleMaximize,
     required this.onToggleChat,
     required this.onBack,
     this.onCreateRoom,
@@ -453,18 +449,6 @@ class DesktopHUD extends StatelessWidget {
                               }).toList();
                             },
                             onSelected: onSelectQuality,
-                          ),
-
-                        // Window Maximize / Unmaximize Toggle Button
-                        if (onToggleMaximize != null)
-                          IconButton(
-                            icon: Icon(
-                              isMaximized ? Icons.filter_none_rounded : Icons.crop_square_rounded,
-                              color: Colors.white70,
-                              size: 18,
-                            ),
-                            tooltip: isMaximized ? 'Restore / Unmaximize Window' : 'Maximize Window',
-                            onPressed: onToggleMaximize,
                           ),
 
                         // Fullscreen Toggle Button

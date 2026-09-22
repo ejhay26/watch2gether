@@ -75,7 +75,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
       final srvs = await _api.getServers(epId);
       final srvId = srvs.isNotEmpty ? srvs[0].id : epId;
 
-      final streamRes = await _api.getSources(srvId);
+      final streamRes = await _api.getSources(srvId, title: widget.item.title);
       final streamUrl = streamRes != null && streamRes.sources.isNotEmpty
           ? streamRes.sources[0].url
           : "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8";

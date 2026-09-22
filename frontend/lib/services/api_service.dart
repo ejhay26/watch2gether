@@ -156,9 +156,13 @@ class ApiService {
     }
   }
 
-  Future<StreamResult?> getSources(String serverId) async {
+  Future<StreamResult?> getSources(String serverId, {String? title}) async {
     try {
-      final res = await _dio.get('/api/v1/sources', queryParameters: {'serverId': serverId});
+      final queryParams = <String, dynamic>{'serverId': serverId};
+      if (title != null && title.isNotEmpty) {
+        queryParams['title'] = title;
+      }
+      final res = await _dio.get('/api/v1/sources', queryParameters: queryParams);
       return StreamResult.fromJson(res.data);
     } catch (e) {
       return null;

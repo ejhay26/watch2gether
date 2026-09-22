@@ -58,7 +58,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _historyTimer;
   bool _controlsVisible = true;
   bool _isFullscreen = false;
-  bool _isMaximized = false;
+  bool _wasMaximizedBeforeFullscreen = false;
   bool _isChatOpen = false;
   bool _isBuffering = false;
 
@@ -133,10 +133,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     if (_isDesktop) {
-      windowManager.isMaximized().then((m) {
-        if (mounted) setState(() => _isMaximized = m);
-      });
-      windowManager.isFullScreen().then((f) {
+windowManager.isFullScreen().then((f) {
         if (mounted) setState(() => _isFullscreen = f);
       });
     }
@@ -240,23 +237,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _toggleFullscreen() async {
     if (_isDesktop) {
       final isFull = await windowManager.isFullScreen();
-      await windowManager.setFullScreen(!isFull);
-      if (mounted) setState(() => _isFullscreen = !isFull);
+      if (!isFull) {
+        // Entering Fullscreen:
+        // If window is currently maximized, unmaximize first so Win32 WS_MAXIMIZE
+        // border style does not block borderless fullscreen transition
+        final isMax = await windowManager.isMaximized();
+        _wasMaximizedBeforeFullscreen = isMax;
+        if (isMax) {
+          await windowManager.unmaximize();
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        await windowManager.setFullScreen(true);
+        await windowManager.focus();
+        if (mounted) setState(() => _isFullscreen = true);
+      } else {
+        // Exiting Fullscreen:
+        await windowManager.setFullScreen(false);
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (_wasMaximizedBeforeFullscreen) {
+          await windowManager.maximize();
+          _wasMaximizedBeforeFullscreen = false;
+        }
+        if (mounted) setState(() => _isFullscreen = false);
+      }
     } else {
       if (mounted) setState(() => _isFullscreen = !_isFullscreen);
-    }
-  }
-
-  Future<void> _toggleMaximize() async {
-    if (_isDesktop) {
-      final isMax = await windowManager.isMaximized();
-      if (isMax) {
-        await windowManager.unmaximize();
-        if (mounted) setState(() => _isMaximized = false);
-      } else {
-        await windowManager.maximize();
-        if (mounted) setState(() => _isMaximized = true);
-      }
     }
   }
 
@@ -495,7 +500,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     volume: volume,
                     isMuted: volume == 0.0,
                     isFullscreen: _isFullscreen,
-                    isMaximized: _isMaximized,
                     isRoom: isRoomActive,
                     roomCode: _currentRoomCode ?? roomService.currentRoomId,
                     participantCount: roomService.state?.participants.length ?? 1,
@@ -517,7 +521,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       _onUserInteraction();
                     },
                     onToggleFullscreen: _toggleFullscreen,
-                    onToggleMaximize: _isDesktop ? _toggleMaximize : null,
                     onToggleChat: () {
                       setState(() {
                         _isChatOpen = !_isChatOpen;
