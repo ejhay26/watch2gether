@@ -76,9 +76,19 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
       final srvId = srvs.isNotEmpty ? srvs[0].id : epId;
 
       final streamRes = await _api.getSources(srvId, title: widget.item.title);
-      final streamUrl = streamRes != null && streamRes.sources.isNotEmpty
-          ? streamRes.sources[0].url
-          : "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8";
+      if (streamRes == null || streamRes.sources.isEmpty) {
+        if (mounted) {
+          setState(() => _isLaunchingPlayer = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Unable to locate a stream for "${widget.item.title}". Please select another server or title.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return;
+      }
+      final streamUrl = streamRes.sources[0].url;
 
       String? roomCode;
       if (createRoom) {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../constants/theme.dart';
-import '../../models/media_item.dart';
+import '../../models/media_item.dart' hide SubtitleTrack;
 
 class DesktopHUD extends StatelessWidget {
   final bool isVisible;
@@ -17,6 +17,8 @@ class DesktopHUD extends StatelessWidget {
   final String? roomCode;
   final int participantCount;
   final bool isChatOpen;
+  final bool hasEpisodes;
+  final bool isEpisodesOpen;
   final StreamResult? streamResult;
   final String currentQuality;
   final String currentAudioTrack;
@@ -29,6 +31,7 @@ class DesktopHUD extends StatelessWidget {
   final VoidCallback onToggleMute;
   final VoidCallback onToggleFullscreen;
   final VoidCallback onToggleChat;
+  final VoidCallback? onToggleEpisodes;
   final VoidCallback onBack;
   final VoidCallback? onCreateRoom;
   final ValueChanged<StreamSource>? onSelectQuality;
@@ -48,20 +51,23 @@ class DesktopHUD extends StatelessWidget {
     required this.isFullscreen,
     required this.isRoom,
     this.roomCode,
-    required this.participantCount,
+    this.participantCount = 1,
     required this.isChatOpen,
+    this.hasEpisodes = false,
+    this.isEpisodesOpen = false,
     this.streamResult,
     this.currentQuality = 'Auto',
     this.currentAudioTrack = 'Default',
     this.currentSubtitle = 'Off',
     this.availableAudioTracks = const [],
-    this.availableSubtitles = const [],
+    this.availableSubtitles = const ['Off'],
     required this.onPlayPause,
     required this.onSeek,
     required this.onVolumeChange,
     required this.onToggleMute,
     required this.onToggleFullscreen,
     required this.onToggleChat,
+    this.onToggleEpisodes,
     required this.onBack,
     this.onCreateRoom,
     this.onSelectQuality,
@@ -70,12 +76,14 @@ class DesktopHUD extends StatelessWidget {
   });
 
   String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    if (d.inHours > 0) {
-      return '${d.inHours}:$minutes:$seconds';
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = d.inHours;
+    final minutes = d.inMinutes.remainder(60);
+    final seconds = d.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '$hours:${twoDigits(minutes)}:${twoDigits(seconds)}';
     }
-    return '$minutes:$seconds';
+    return '${twoDigits(minutes)}:${twoDigits(seconds)}';
   }
 
   @override
@@ -86,17 +94,17 @@ class DesktopHUD extends StatelessWidget {
       child: IgnorePointer(
         ignoring: !isVisible,
         child: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Color(0xCC000000),
+                Colors.black.withOpacity(0.85),
                 Colors.transparent,
                 Colors.transparent,
-                Color(0xEE000000),
+                Colors.black.withOpacity(0.92),
               ],
-              stops: [0.0, 0.2, 0.7, 1.0],
+              stops: const [0.0, 0.22, 0.72, 1.0],
             ),
           ),
           child: Column(
@@ -264,8 +272,8 @@ class DesktopHUD extends StatelessWidget {
                               value: duration.inMilliseconds > 0
                                   ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
                                   : 0.0,
-                              onChanged: (val) {
-                                final targetMs = (val * duration.inMilliseconds).toInt();
+                              onChanged: (percent) {
+                                final targetMs = (percent * duration.inMilliseconds).toInt();
                                 onSeek(Duration(milliseconds: targetMs));
                               },
                             ),
@@ -294,37 +302,38 @@ class DesktopHUD extends StatelessWidget {
                           onPressed: onPlayPause,
                         ),
 
-                        // Replay 10s
+                        // Rewind 5s (updated from 10s)
                         IconButton(
-                          icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 20),
-                          tooltip: 'Rewind 10s',
+                          icon: const Icon(Icons.replay_5_rounded, color: Colors.white70, size: 20),
+                          tooltip: 'Rewind 5s',
                           onPressed: () {
-                            final target = position - const Duration(seconds: 10);
+                            final target = position - const Duration(seconds: 5);
                             onSeek(target < Duration.zero ? Duration.zero : target);
                           },
                         ),
 
-                        // Forward 10s
+                        // Fast Forward 5s (updated from 10s)
                         IconButton(
-                          icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 20),
-                          tooltip: 'Fast Forward 10s',
+                          icon: const Icon(Icons.forward_5_rounded, color: Colors.white70, size: 20),
+                          tooltip: 'Fast Forward 5s',
                           onPressed: () {
-                            final target = position + const Duration(seconds: 10);
+                            final target = position + const Duration(seconds: 5);
                             onSeek(target > duration ? duration : target);
                           },
                         ),
 
-                        // Volume Slider
+                        // Volume Slider (Expanded from 75px to 140px width)
                         IconButton(
                           icon: Icon(
                             isMuted || volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                             color: Colors.white,
                             size: 20,
                           ),
+                          tooltip: isMuted ? 'Unmute' : 'Mute',
                           onPressed: onToggleMute,
                         ),
                         SizedBox(
-                          width: 75,
+                          width: 140, // Wider volume slider
                           child: SliderTheme(
                             data: SliderThemeData(
                               trackHeight: 2,
@@ -341,6 +350,18 @@ class DesktopHUD extends StatelessWidget {
                         ),
 
                         const Spacer(),
+
+                        // Seasons & Episodes Button (if series/anime)
+                        if (hasEpisodes && onToggleEpisodes != null)
+                          IconButton(
+                            icon: Icon(
+                              Icons.video_library_rounded,
+                              color: isEpisodesOpen ? AppColors.accent : Colors.white,
+                              size: 20,
+                            ),
+                            tooltip: isEpisodesOpen ? 'Close Episodes' : 'Seasons & Episodes',
+                            onPressed: onToggleEpisodes,
+                          ),
 
                         // Audio Dub / Track Selector
                         PopupMenuButton<String>(

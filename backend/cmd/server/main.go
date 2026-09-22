@@ -34,7 +34,7 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 
-	log.Println("Starting Watch2Gether Server...")
+	log.Println("Starting Watch2Gether Server with Batteries-Included Security...")
 
 	// 1. Database Connection (Supabase PostgreSQL)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -54,32 +54,43 @@ func main() {
 		log.Println("DATABASE_URL not configured. Running without persistent database.")
 	}
 
-	// 2. Scraper & Providers
+	// 2. Scraper & Multi-Source Providers (TMDB, HiAnime/Ani-Cli, Video & Audio Engines)
 	scraperManager := scraper.NewManager("")
 
 	// 3. Room Hub
 	roomHub := room.NewHub()
 
-	// 4. Fiber App Setup
+	// 4. Fiber App Setup with Safe Error Handling
 	app := fiber.New(fiber.Config{
 		AppName:      "Watch2Gether API v1.0",
 		ServerHeader: "Watch2Gether",
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			return c.Status(code).JSON(fiber.Map{
+				"error":   err.Error(),
+				"status":  code,
+				"service": "watch2gether-backend",
+			})
+		},
 	})
 
-	app.Use(recover.New())
+	// Batteries-Included Security Stack
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: false,
+	}))
 	app.Use(logger.New())
+	app.Use(api.SecurityHeaders())
+	app.Use(api.InputSanitizer())
+	app.Use(api.RateLimiter(120, 1*time.Minute))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     "*",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, ngrok-skip-browser-warning, X-Requested-With",
 		AllowCredentials: false,
 	}))
-
-	// Middleware to handle ngrok browser warning bypass header for all responses
-	app.Use(func(c *fiber.Ctx) error {
-		c.Set("ngrok-skip-browser-warning", "true")
-		return c.Next()
-	})
 
 	// 5. Register Routes
 	mediaHandler := api.NewMediaHandler(scraperManager)
@@ -101,6 +112,7 @@ func main() {
 		return c.JSON(fiber.Map{
 			"app":       "Watch2Gether Server",
 			"status":    "running",
+			"security":  "batteries-included (rate-limiting, security-headers, input-sanitizer, panic-recovery)",
 			"timestamp": time.Now().UTC(),
 			"endpoints": fiber.Map{
 				"health":    "/api/v1/health",

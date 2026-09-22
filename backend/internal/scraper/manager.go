@@ -3,8 +3,10 @@ package scraper
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/ejhay26/watch2gether/backend/internal/engine/anime"
 	"github.com/ejhay26/watch2gether/backend/internal/engine/audio"
 	"github.com/ejhay26/watch2gether/backend/internal/engine/catalog"
 	"github.com/ejhay26/watch2gether/backend/internal/engine/subtitle"
@@ -16,6 +18,7 @@ type Manager struct {
 	videoEngine    *video.VideoEngine
 	subtitleEngine *subtitle.SubtitleEngine
 	audioEngine    *audio.AudioEngine
+	animeEngine    *anime.AnimeEngine
 	demo           *DemoProvider
 	flixhq         *FlixHQScraper
 }
@@ -30,12 +33,14 @@ func NewManager(flixhqURL string) *Manager {
 	ce := catalog.NewCatalogEngine(ve.GetArchiveProvider(), keys)
 	se := subtitle.NewSubtitleEngine()
 	ae := audio.NewAudioEngine()
+	ane := anime.NewAnimeEngine()
 
 	return &Manager{
 		catalogEngine:  ce,
 		videoEngine:    ve,
 		subtitleEngine: se,
 		audioEngine:    ae,
+		animeEngine:    ane,
 		demo:           NewDemoProvider(),
 		flixhq:         NewFlixHQScraper(flixhqURL),
 	}
@@ -64,111 +69,163 @@ func (m *Manager) GetAudioEngine() *audio.AudioEngine {
 	return m.audioEngine
 }
 
+func (m *Manager) GetAnimeEngine() *anime.AnimeEngine {
+	return m.animeEngine
+}
+
 func (m *Manager) Search(query string) ([]MediaItem, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
-	results, err := m.catalogEngine.Search(ctx, query)
-	if err != nil {
-		results = []MediaItem{}
-	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	seen := make(map[string]bool)
 	var combined []MediaItem
-	for _, it := range results {
+
+	addItem := func(it MediaItem) {
+		mu.Lock()
+		defer mu.Unlock()
 		if !seen[it.ID] {
 			seen[it.ID] = true
 			combined = append(combined, it)
 		}
 	}
 
-	if m.demo != nil {
-		demoRes, _ := m.demo.Search(query)
-		for _, it := range demoRes {
-			if !seen[it.ID] {
-				seen[it.ID] = true
-				combined = append(combined, it)
+	// 1. Search TMDB / Catalog
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results, err := m.catalogEngine.Search(ctx, query)
+		if err == nil {
+			for _, it := range results {
+				addItem(it)
 			}
 		}
-	}
+	}()
 
-	// Non-blocking query to FlixHQ
-	if m.flixhq != nil {
-		ch := make(chan []MediaItem, 1)
+	// 2. Search HiAnime / Ani-Cli (Anime, Cartoons, Series)
+	if m.animeEngine != nil {
+		wg.Add(1)
 		go func() {
-			items, _ := m.flixhq.Search(query)
-			ch <- items
-		}()
-
-		select {
-		case items := <-ch:
-			for _, it := range items {
-				if !seen[it.ID] {
-					seen[it.ID] = true
-					combined = append(combined, it)
+			defer wg.Done()
+			results, err := m.animeEngine.Search(ctx, query)
+			if err == nil {
+				for _, it := range results {
+					addItem(it)
 				}
 			}
-		case <-time.After(1200 * time.Millisecond):
-			// Timeout FlixHQ gracefully
-		}
+		}()
+	}
+
+	// 3. Search Demo
+	if m.demo != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			demoRes, err := m.demo.Search(query)
+			if err == nil {
+				for _, it := range demoRes {
+					addItem(it)
+				}
+			}
+		}()
+	}
+
+	// Wait with grace period
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case <-time.After(5 * time.Second):
 	}
 
 	return combined, nil
 }
 
 func (m *Manager) GetTrending() ([]MediaItem, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
-	results, err := m.catalogEngine.GetTrending(ctx)
-	if err != nil {
-		results = []MediaItem{}
-	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	seen := make(map[string]bool)
 	var combined []MediaItem
-	for _, it := range results {
+
+	addItem := func(it MediaItem) {
+		mu.Lock()
+		defer mu.Unlock()
 		if !seen[it.ID] {
 			seen[it.ID] = true
 			combined = append(combined, it)
 		}
 	}
 
-	if m.demo != nil {
-		demoTrending, _ := m.demo.GetTrending()
-		for _, it := range demoTrending {
-			if !seen[it.ID] {
-				seen[it.ID] = true
-				combined = append(combined, it)
+	// 1. TMDB Trending
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results, err := m.catalogEngine.GetTrending(ctx)
+		if err == nil {
+			for _, it := range results {
+				addItem(it)
 			}
 		}
-	}
+	}()
 
-	// Non-blocking query to FlixHQ
-	if m.flixhq != nil {
-		ch := make(chan []MediaItem, 1)
+	// 2. HiAnime Trending (Popular Anime & Animation)
+	if m.animeEngine != nil {
+		wg.Add(1)
 		go func() {
-			items, _ := m.flixhq.GetTrending()
-			ch <- items
-		}()
-
-		select {
-		case items := <-ch:
-			for _, it := range items {
-				if !seen[it.ID] {
-					seen[it.ID] = true
-					combined = append(combined, it)
+			defer wg.Done()
+			results, err := m.animeEngine.GetTrending(ctx)
+			if err == nil {
+				for _, it := range results {
+					addItem(it)
 				}
 			}
-		case <-time.After(1200 * time.Millisecond):
-			// Timeout FlixHQ gracefully
-		}
+		}()
+	}
+
+	// 3. Demo trending
+	if m.demo != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			demoRes, err := m.demo.GetTrending()
+			if err == nil {
+				for _, it := range demoRes {
+					addItem(it)
+				}
+			}
+		}()
+	}
+
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case <-time.After(5 * time.Second):
 	}
 
 	return combined, nil
 }
 
 func (m *Manager) GetDetails(id string) (*MediaDetails, error) {
+	if strings.HasPrefix(id, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return m.animeEngine.GetDetails(ctx, id)
+	}
 	if strings.HasPrefix(id, "demo-") {
 		return m.demo.GetDetails(id)
 	}
@@ -181,6 +238,11 @@ func (m *Manager) GetDetails(id string) (*MediaDetails, error) {
 }
 
 func (m *Manager) GetEpisodes(id string, season int) ([]Episode, error) {
+	if strings.HasPrefix(id, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return m.animeEngine.GetEpisodes(ctx, id)
+	}
 	if strings.HasPrefix(id, "demo-") {
 		return m.demo.GetEpisodes(id, season)
 	}
@@ -193,6 +255,11 @@ func (m *Manager) GetEpisodes(id string, season int) ([]Episode, error) {
 }
 
 func (m *Manager) GetServers(episodeId string) ([]Server, error) {
+	if strings.HasPrefix(episodeId, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return m.animeEngine.GetServers(ctx, episodeId)
+	}
 	if strings.HasPrefix(episodeId, "demo-") {
 		return m.demo.GetServers(episodeId)
 	}
@@ -203,6 +270,11 @@ func (m *Manager) GetServers(episodeId string) ([]Server, error) {
 }
 
 func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server, error) {
+	if strings.HasPrefix(episodeId, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		return m.animeEngine.GetServers(ctx, episodeId)
+	}
 	if strings.HasPrefix(episodeId, "demo-") {
 		return m.demo.GetServers(episodeId)
 	}
@@ -213,6 +285,11 @@ func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server,
 }
 
 func (m *Manager) GetStream(serverId string) (*StreamResult, error) {
+	if strings.HasPrefix(serverId, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		return m.animeEngine.GetStream(ctx, serverId)
+	}
 	if strings.HasPrefix(serverId, "demo-") {
 		return m.demo.GetStream(serverId)
 	}
@@ -236,6 +313,11 @@ func (m *Manager) GetStream(serverId string) (*StreamResult, error) {
 }
 
 func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResult, error) {
+	if strings.HasPrefix(serverId, "anime-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		return m.animeEngine.GetStream(ctx, serverId)
+	}
 	if strings.HasPrefix(serverId, "demo-") {
 		return m.demo.GetStream(serverId)
 	}

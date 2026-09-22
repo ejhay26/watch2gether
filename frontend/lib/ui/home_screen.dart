@@ -23,6 +23,75 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MediaItem> _items = [];
   bool _isLoading = true;
   String? _error;
+  int _selectedFilter = 0; // 0: All / Trending, 1: Anime & Animation, 2: Movies, 3: TV Series
+
+  Future<void> _selectFilter(int index) async {
+    setState(() {
+      _selectedFilter = index;
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      if (index == 0) {
+        final items = await _api.getTrending();
+        setState(() {
+          _items = items;
+          _isLoading = false;
+        });
+      } else if (index == 1) {
+        final results = await _api.search('Anime');
+        setState(() {
+          _items = results;
+          _isLoading = false;
+        });
+      } else if (index == 2) {
+        final items = await _api.getTrending();
+        setState(() {
+          _items = items.where((it) => it.type == 'movie').toList();
+          _isLoading = false;
+        });
+      } else if (index == 3) {
+        final items = await _api.getTrending();
+        setState(() {
+          _items = items.where((it) => it.type == 'tv' || it.id.startsWith('anime-')).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load content';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Widget _buildCategoryChip(int index, String label) {
+    final isSelected = _selectedFilter == index;
+    return InkWell(
+      onTap: () => _selectFilter(index),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accent : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isSelected ? AppColors.accent : AppColors.surfaceBorder,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.black : Colors.white,
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -121,13 +190,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(ctx).pop();
                 final room = await _api.getRoom(code);
                 if (room != null && mounted) {
+                  if (room.streamUrl.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Watch room has no active stream URL.')),
+                    );
+                    return;
+                  }
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => PlayerScreen(
                         title: room.title,
-                        streamUrl: room.streamUrl.isNotEmpty
-                            ? room.streamUrl
-                            : "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
+                        streamUrl: room.streamUrl,
                         mediaId: room.mediaId,
                         episodeId: room.episodeId,
                         initialRoomCode: code,
@@ -269,6 +342,27 @@ class _HomeScreenState extends State<HomeScreen> {
               onSubmitted: _performSearch,
             ),
           ),
+
+          // Category Filters (Trending, Anime, Movies, TV)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
+            child: SizedBox(
+              height: 34,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _buildCategoryChip(0, '🔥 All & Trending'),
+                  const SizedBox(width: 8),
+                  _buildCategoryChip(1, '⛩️ Anime & Animation'),
+                  const SizedBox(width: 8),
+                  _buildCategoryChip(2, '🎬 Movies'),
+                  const SizedBox(width: 8),
+                  _buildCategoryChip(3, '📺 TV Series'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
 
           // Content Area
           Expanded(
