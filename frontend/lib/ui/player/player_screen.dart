@@ -436,6 +436,19 @@ windowManager.isFullScreen().then((f) {
                             child: Video(
                               controller: _controller,
                               controls: NoVideoControls,
+                              subtitleViewConfiguration: const SubtitleViewConfiguration(
+                                style: TextStyle(
+                                  height: 1.4,
+                                  fontSize: 24.0,
+                                  letterSpacing: 0.2,
+                                  wordSpacing: 1.0,
+                                  color: Color(0xffffffff),
+                                  fontWeight: FontWeight.bold,
+                                  backgroundColor: Color(0xaa000000),
+                                ),
+                                textAlign: TextAlign.center,
+                                padding: EdgeInsets.all(24.0),
+                              ),
                             ),
                           ),
 

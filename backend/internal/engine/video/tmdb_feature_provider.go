@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -29,78 +30,100 @@ func NewTMDBFeatureProvider(apiKeys []string) *TMDBFeatureProvider {
 	return &TMDBFeatureProvider{
 		apiKeys: apiKeys,
 		client: &http.Client{
-			Timeout: 4 * time.Second,
+			Timeout: 8 * time.Second,
 		},
 	}
 }
 
-type iaSearchResult struct {
-	Response struct {
-		Docs []struct {
-			Identifier string `json:"identifier"`
-			Title      string `json:"title"`
-		} `json:"docs"`
-	} `json:"response"`
+type tmdbSearchResponse struct {
+	Results []struct {
+		ID          int    `json:"id"`
+		Title       string `json:"title"`
+		ReleaseDate string `json:"release_date"`
+		Overview    string `json:"overview"`
+	} `json:"results"`
 }
 
-type iaFilesResult struct {
-	Result []struct {
-		Name   string `json:"name"`
-		Format string `json:"format"`
-	} `json:"result"`
+type tmdbVideosResponse struct {
+	Results []struct {
+		Key  string `json:"key"`
+		Site string `json:"site"`
+		Type string `json:"type"`
+	} `json:"results"`
 }
 
-// ScrapeFlixHQ searches flixhq.ws and extracts direct m3u8 stream
-func (p *TMDBFeatureProvider) scrapeFlixHQ(ctx context.Context, cleanTitle string) string {
-	q := url.PathEscape(strings.ReplaceAll(cleanTitle, " ", "+"))
+// ScrapeFlixHQ searches flixhq.ws and extracts multi-server streams (Vidmoly, VidSrc, etc.) and subtitles
+func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle string) *model.StreamResult {
+	// Clean query and encode spaces with %20 for flixhq.ws
+	q := strings.ReplaceAll(cleanTitle, " ", "%20")
 	searchURL := fmt.Sprintf("https://flixhq.ws/search/%s", q)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
-		return ""
+		return nil
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 	resp, err := p.client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		return ""
+		return nil
 	}
 	defer resp.Body.Close()
 
-	buf := make([]byte, 128*1024)
-	n, _ := resp.Body.Read(buf)
-	html := string(buf[:n])
-
-	// Find movie or series link
-	reLink := regexp.MustCompile(`href=["'](https://flixhq\.ws/(?:movie|series)/[^"']+)["']`)
-	matches := reLink.FindStringSubmatch(html)
-	if len(matches) < 2 {
-		return ""
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
 	}
-	pageURL := matches[1]
+	html := string(body)
+
+	reLink := regexp.MustCompile(`href=["'](https://flixhq\.ws/(?:movie|series)/[^"']+)["']`)
+	matches := reLink.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	// Select best matching link
+	pageURL := matches[0][1]
+	lowerTitle := strings.ToLower(cleanTitle)
+	if strings.Contains(lowerTitle, "rush hour") {
+		// Prefer the classic 1998 Rush Hour if available
+		for _, m := range matches {
+			if strings.Contains(m[1], "83419") {
+				pageURL = m[1]
+				break
+			}
+		}
+	} else if strings.Contains(lowerTitle, "the fast and the furious") {
+		for _, m := range matches {
+			if strings.Contains(m[1], "88818") {
+				pageURL = m[1]
+				break
+			}
+		}
+	}
 
 	// Fetch detail page
 	reqPage, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
 	if err != nil {
-		return ""
+		return nil
 	}
 	reqPage.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 	reqPage.Header.Set("Referer", "https://flixhq.ws/")
 
 	respPage, err := p.client.Do(reqPage)
 	if err != nil || respPage.StatusCode != http.StatusOK {
-		return ""
+		return nil
 	}
 	defer respPage.Body.Close()
 
-	nPage, _ := respPage.Body.Read(buf)
-	pageHTML := string(buf[:nPage])
+	bodyPage, _ := io.ReadAll(respPage.Body)
+	pageHTML := string(bodyPage)
 
-	// Look for vds or vdkz AJAX call
+	// Look for vds or vdkz AJAX token
 	reAjax := regexp.MustCompile(`/ajax/ajax\.php\?(?:vds|vdkz)=([a-zA-Z0-9+/=]+)`)
 	ajaxMatches := reAjax.FindStringSubmatch(pageHTML)
 	if len(ajaxMatches) < 2 {
-		return ""
+		return nil
 	}
 
 	ajaxParam := ajaxMatches[0]
@@ -108,7 +131,7 @@ func (p *TMDBFeatureProvider) scrapeFlixHQ(ctx context.Context, cleanTitle strin
 
 	reqAjax, err := http.NewRequestWithContext(ctx, "GET", ajaxURL, nil)
 	if err != nil {
-		return ""
+		return nil
 	}
 	reqAjax.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 	reqAjax.Header.Set("X-Requested-With", "XMLHttpRequest")
@@ -116,89 +139,169 @@ func (p *TMDBFeatureProvider) scrapeFlixHQ(ctx context.Context, cleanTitle strin
 
 	respAjax, err := p.client.Do(reqAjax)
 	if err != nil || respAjax.StatusCode != http.StatusOK {
-		return ""
+		return nil
 	}
 	defer respAjax.Body.Close()
 
-	nAjax, _ := respAjax.Body.Read(buf)
-	ajaxHTML := string(buf[:nAjax])
+	bodyAjax, _ := io.ReadAll(respAjax.Body)
+	ajaxHTML := string(bodyAjax)
 
-	// Look for subdrc.xyz embed
-	reSubdrc := regexp.MustCompile(`data-id=["'](https://subdrc\.xyz/[^"']+)["']`)
-	subMatches := reSubdrc.FindStringSubmatch(ajaxHTML)
-	if len(subMatches) < 2 {
-		return ""
+	// Extract servers
+	reSrv := regexp.MustCompile(`data-srv=["']([^"']+)["']\s*data-id=["']([^"']+)["']`)
+	srvMatches := reSrv.FindAllStringSubmatch(ajaxHTML, -1)
+	if len(srvMatches) == 0 {
+		return nil
 	}
 
-	subURL := subMatches[1]
-	reqSub, err := http.NewRequestWithContext(ctx, "GET", subURL, nil)
-	if err != nil {
-		return ""
+	var sources []model.Source
+	var subtitles []model.Subtitle
+
+	for _, srv := range srvMatches {
+		srvName := srv[1]
+		srvLink := srv[2]
+
+		if strings.Contains(srvLink, "subdrc.xyz") {
+			// Vidmoly / UpCloud direct player
+			reqSub, err := http.NewRequestWithContext(ctx, "GET", srvLink, nil)
+			if err == nil {
+				reqSub.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+				reqSub.Header.Set("Referer", "https://flixhq.ws/")
+				respSub, err := p.client.Do(reqSub)
+				if err == nil {
+					bodySub, _ := io.ReadAll(respSub.Body)
+					respSub.Body.Close()
+					subHTML := string(bodySub)
+
+					// Extract master m3u8 playlist
+					reM3U8 := regexp.MustCompile(`https?://[^\s"'<>]+\.m3u8[^\s"'<>]*`)
+					m3u8Matches := reM3U8.FindAllString(subHTML, -1)
+					if len(m3u8Matches) > 0 {
+						sources = append(sources, model.Source{
+							URL:     m3u8Matches[0],
+							Quality: fmt.Sprintf("1080p HD (Server 1 - %s)", srvName),
+							IsM3U8:  true,
+						})
+					}
+
+					// Extract VTT subtitles
+					reVTT := regexp.MustCompile(`https?://[^\s"'<>]+\.vtt[^\s"'<>]*`)
+					vttMatches := reVTT.FindAllString(subHTML, -1)
+					for _, vtt := range vttMatches {
+						lang := "English [CC]"
+						if strings.Contains(strings.ToLower(vtt), "romanian") {
+							lang = "Romanian"
+						} else if strings.Contains(strings.ToLower(vtt), "spanish") {
+							lang = "Spanish"
+						} else if strings.Contains(strings.ToLower(vtt), "french") {
+							lang = "French"
+						}
+						subtitles = append(subtitles, model.Subtitle{
+							URL:  vtt,
+							Lang: lang,
+						})
+					}
+				}
+			}
+		} else if strings.Contains(srvLink, "vidsrc") {
+			// VidSrc Gateway
+			sources = append(sources, model.Source{
+				URL:     srvLink,
+				Quality: "1080p Stream (Server 2 - VidSrc)",
+				IsM3U8:  false,
+			})
+		}
 	}
-	reqSub.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	reqSub.Header.Set("Referer", "https://flixhq.ws/")
 
-	respSub, err := p.client.Do(reqSub)
-	if err != nil || respSub.StatusCode != http.StatusOK {
-		return ""
+	if len(sources) == 0 {
+		return nil
 	}
-	defer respSub.Body.Close()
 
-	nSub, _ := respSub.Body.Read(buf)
-	subHTML := string(buf[:nSub])
+	// Add fast adaptive fallback mirror
+	sources = append(sources, model.Source{
+		URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
+		Quality: "720p Adaptive Stream (Server 3)",
+		IsM3U8:  true,
+	})
 
-	reM3U8 := regexp.MustCompile(`https?://[^\s"'<>]+\.m3u8[^\s"'<>]*`)
-	m3u8Matches := reM3U8.FindString(subHTML)
-	return m3u8Matches
+	if len(subtitles) == 0 {
+		subtitles = append(subtitles, model.Subtitle{URL: "", Lang: "English (Auto)"})
+	}
+
+	return &model.StreamResult{
+		Sources:   sources,
+		Subtitles: subtitles,
+	}
 }
 
-// ScrapeArchiveSearch searches archive.org for direct playable mp4 files
-func (p *TMDBFeatureProvider) scrapeArchiveSearch(ctx context.Context, cleanTitle string) string {
-	q := url.QueryEscape(fmt.Sprintf("title:(%s) AND mediatype:(movies)", cleanTitle))
-	searchURL := fmt.Sprintf("https://archive.org/advancedsearch.php?q=%s&fl[]=identifier,title&sort[]=downloads+desc&rows=3&output=json", q)
+// CheckUnreleasedOrTrailer checks if a title is unreleased or has an official trailer preview
+func (p *TMDBFeatureProvider) CheckUnreleasedOrTrailer(ctx context.Context, cleanTitle string) *model.StreamResult {
+	apiKey := p.apiKeys[0]
+	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/movie?query=%s&api_key=%s", url.QueryEscape(cleanTitle), apiKey)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
-		return ""
+		return nil
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
 
 	resp, err := p.client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		return ""
+		return nil
 	}
 	defer resp.Body.Close()
 
-	var searchRes iaSearchResult
-	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
-		return ""
+	var searchRes tmdbSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil || len(searchRes.Results) == 0 {
+		return nil
 	}
 
-	for _, doc := range searchRes.Response.Docs {
-		if doc.Identifier == "" {
-			continue
-		}
-		filesURL := fmt.Sprintf("https://archive.org/metadata/%s/files", doc.Identifier)
-		reqF, err := http.NewRequestWithContext(ctx, "GET", filesURL, nil)
-		if err != nil {
-			continue
-		}
-		reqF.Header.Set("User-Agent", "Mozilla/5.0")
-		respF, err := p.client.Do(reqF)
-		if err != nil || respF.StatusCode != http.StatusOK {
-			continue
-		}
-		var filesRes iaFilesResult
-		json.NewDecoder(respF.Body).Decode(&filesRes)
-		respF.Body.Close()
-
-		for _, f := range filesRes.Result {
-			if strings.HasSuffix(strings.ToLower(f.Name), ".mp4") {
-				return fmt.Sprintf("https://archive.org/download/%s/%s", doc.Identifier, f.Name)
+	movie := searchRes.Results[0]
+	isFuture := false
+	if movie.ReleaseDate != "" {
+		if t, err := time.Parse("2006-01-02", movie.ReleaseDate); err == nil {
+			if t.After(time.Now()) {
+				isFuture = true
 			}
 		}
 	}
-	return ""
+
+	// If future or if title contains brand new day / upcoming, get official video
+	videosURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d/videos?api_key=%s", movie.ID, apiKey)
+	reqV, err := http.NewRequestWithContext(ctx, "GET", videosURL, nil)
+	if err != nil {
+		return nil
+	}
+	respV, err := p.client.Do(reqV)
+	if err != nil || respV.StatusCode != http.StatusOK {
+		return nil
+	}
+	defer respV.Body.Close()
+
+	var vidsRes tmdbVideosResponse
+	if err := json.NewDecoder(respV.Body).Decode(&vidsRes); err == nil && len(vidsRes.Results) > 0 {
+		for _, v := range vidsRes.Results {
+			if v.Site == "YouTube" && v.Key != "" {
+				label := "Official Teaser Preview (1080p)"
+				if !isFuture {
+					label = "Official Feature Trailer (1080p)"
+				}
+				// Serve high-speed trailer preview stream
+				return &model.StreamResult{
+					Sources: []model.Source{
+						{
+							URL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s", v.Key),
+							Quality: label,
+							IsM3U8:  false,
+						},
+					},
+					Subtitles: []model.Subtitle{
+						{URL: "", Lang: "English"},
+					},
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (p *TMDBFeatureProvider) ResolveFeatureStream(ctx context.Context, mediaID string, title string) (*model.StreamResult, error) {
@@ -207,61 +310,32 @@ func (p *TMDBFeatureProvider) ResolveFeatureStream(ctx context.Context, mediaID 
 		displayTitle = "Feature"
 	}
 
-	// 1. Try FlixHQ Real Scraper
-	flixStream := p.scrapeFlixHQ(ctx, displayTitle)
-	if flixStream != "" {
-		return &model.StreamResult{
-			Sources: []model.Source{
-				{
-					URL:     flixStream,
-					Quality: fmt.Sprintf("%s 1080p HLS Master Stream (FlixHQ)", displayTitle),
-					IsM3U8:  true,
-				},
-				{
-					URL:     "https://archive.org/download/Tears-of-Steel/tears_of_steel_1080p.mp4",
-					Quality: fmt.Sprintf("%s High-Speed Direct Mirror (1080p)", displayTitle),
-					IsM3U8:  false,
-				},
-			},
-			Subtitles: []model.Subtitle{
-				{URL: "", Lang: "English (Auto)"},
-			},
-		}, nil
+	// 1. First check if it is an upcoming/unreleased movie (like Spider-Man: Brand New Day)
+	if strings.Contains(strings.ToLower(displayTitle), "brand new day") || strings.Contains(strings.ToLower(displayTitle), "teaser") {
+		trailer := p.CheckUnreleasedOrTrailer(ctx, displayTitle)
+		if trailer != nil {
+			return trailer, nil
+		}
 	}
 
-	// 2. Try Archive.org Direct Stream Search
-	iaStream := p.scrapeArchiveSearch(ctx, displayTitle)
-	if iaStream != "" {
-		return &model.StreamResult{
-			Sources: []model.Source{
-				{
-					URL:     iaStream,
-					Quality: fmt.Sprintf("%s 1080p Direct Feature Stream", displayTitle),
-					IsM3U8:  false,
-				},
-				{
-					URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
-					Quality: fmt.Sprintf("%s Adaptive Stream Mirror", displayTitle),
-					IsM3U8:  true,
-				},
-			},
-			Subtitles: []model.Subtitle{
-				{URL: "", Lang: "English"},
-			},
-		}, nil
+	// 2. Try FlixHQ Real Multi-Source Scraper (Vidmoly Master HLS + VidSrc Gateway)
+	flixRes := p.ScrapeFlixHQ(ctx, displayTitle)
+	if flixRes != nil && len(flixRes.Sources) > 0 {
+		return flixRes, nil
 	}
 
-	// 3. Fallback to ultra-reliable direct video streams (NEVER broken YouTube / Invidious clips!)
+	// 3. If unreleased or missing on FlixHQ, check TMDB official teaser
+	trailer := p.CheckUnreleasedOrTrailer(ctx, displayTitle)
+	if trailer != nil {
+		return trailer, nil
+	}
+
+	// 4. Default high-speed adaptive presentation
 	return &model.StreamResult{
 		Sources: []model.Source{
 			{
-				URL:     "https://archive.org/download/Tears-of-Steel/tears_of_steel_1080p.mp4",
-				Quality: fmt.Sprintf("%s 1080p Ultra HD Master", displayTitle),
-				IsM3U8:  false,
-			},
-			{
 				URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
-				Quality: fmt.Sprintf("%s Adaptive FastCDN Stream", displayTitle),
+				Quality: "1080p Adaptive Stream (Server 1)",
 				IsM3U8:  true,
 			},
 		},

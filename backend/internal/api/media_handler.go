@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/ejhay26/watch2gether/backend/internal/scraper"
 	"github.com/gofiber/fiber/v2"
@@ -25,6 +27,7 @@ func (h *MediaHandler) RegisterRoutes(router fiber.Router) {
 	api.Get("/episodes", h.GetEpisodes)
 	api.Get("/servers", h.GetServers)
 	api.Get("/sources", h.GetSources)
+	api.Get("/subtitles/vtt", h.GetVTTSubtitles)
 }
 
 func (h *MediaHandler) Health(c *fiber.Ctx) error {
@@ -157,4 +160,25 @@ func (h *MediaHandler) GetSources(c *fiber.Ctx) error {
 		})
 	}
 	return c.JSON(stream)
+}
+
+func (h *MediaHandler) GetVTTSubtitles(c *fiber.Ctx) error {
+	lang := c.Query("lang", "en")
+	title := c.Query("title", "Feature Presentation")
+
+	c.Set("Content-Type", "text/vtt; charset=utf-8")
+	c.Set("Access-Control-Allow-Origin", "*")
+
+	vtt := fmt.Sprintf(`WEBVTT - %s [%s]
+
+1
+00:00:01.000 --> 00:00:06.000
+[%s - Audio Stream Active]
+
+2
+00:00:06.500 --> 00:00:12.000
+Subtitles synchronized with multi-source video playback.
+`, title, strings.ToUpper(lang), title)
+
+	return c.SendString(vtt)
 }

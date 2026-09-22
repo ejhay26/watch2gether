@@ -347,6 +347,9 @@ class DesktopHUD extends StatelessWidget {
                           tooltip: 'Audio Dub / Languages',
                           icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 20),
                           color: const Color(0xFF1B1E28),
+                          elevation: 8,
+                          offset: const Offset(0, -180),
+                          constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
                             final tracks = availableAudioTracks.isNotEmpty
                                 ? availableAudioTracks
@@ -363,12 +366,16 @@ class DesktopHUD extends StatelessWidget {
                                       color: isSelected ? AppColors.accent : Colors.white54,
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
-                                      track,
-                                      style: TextStyle(
-                                        color: isSelected ? AppColors.accent : Colors.white,
-                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                        fontSize: 13,
+                                    Expanded(
+                                      child: Text(
+                                        track,
+                                        style: TextStyle(
+                                          color: isSelected ? AppColors.accent : Colors.white,
+                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                          fontSize: 13,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],
@@ -384,6 +391,9 @@ class DesktopHUD extends StatelessWidget {
                           tooltip: 'Subtitles / Captions',
                           icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 20),
                           color: const Color(0xFF1B1E28),
+                          elevation: 8,
+                          offset: const Offset(0, -220),
+                          constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
                             final subs = availableSubtitles.isNotEmpty
                                 ? availableSubtitles
@@ -400,12 +410,16 @@ class DesktopHUD extends StatelessWidget {
                                       color: isSelected ? AppColors.accent : Colors.white54,
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
-                                      s,
-                                      style: TextStyle(
-                                        color: isSelected ? AppColors.accent : Colors.white,
-                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                        fontSize: 13,
+                                    Expanded(
+                                      child: Text(
+                                        s,
+                                        style: TextStyle(
+                                          color: isSelected ? AppColors.accent : Colors.white,
+                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                          fontSize: 13,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],
@@ -422,6 +436,9 @@ class DesktopHUD extends StatelessWidget {
                             tooltip: 'Dynamic Sources & Quality',
                             icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
                             color: const Color(0xFF1B1E28),
+                            elevation: 8,
+                            offset: const Offset(0, -200),
+                            constraints: const BoxConstraints(minWidth: 240, maxWidth: 380),
                             itemBuilder: (ctx) {
                               return streamResult!.sources.map((src) {
                                 final isSelected = src.quality == currentQuality || (currentQuality == 'Auto' && src == streamResult!.sources.first);
@@ -435,12 +452,16 @@ class DesktopHUD extends StatelessWidget {
                                         color: isSelected ? AppColors.accent : Colors.white54,
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(
-                                        src.quality,
-                                        style: TextStyle(
-                                          color: isSelected ? AppColors.accent : Colors.white,
-                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                          fontSize: 13,
+                                      Expanded(
+                                        child: Text(
+                                          src.quality,
+                                          style: TextStyle(
+                                            color: isSelected ? AppColors.accent : Colors.white,
+                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                            fontSize: 13,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ],
