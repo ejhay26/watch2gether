@@ -41,9 +41,10 @@ class ProfileDialog extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
               // Close button & title
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -147,6 +148,7 @@ class ProfileDialog extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),

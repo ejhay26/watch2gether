@@ -57,6 +57,7 @@ class RoomStateData {
   final bool isPlaying;
   final List<Participant> participants;
   final List<ChatMessage> recentChat;
+  final DateTime lastUpdated;
 
   RoomStateData({
     required this.roomId,
@@ -69,7 +70,42 @@ class RoomStateData {
     required this.isPlaying,
     required this.participants,
     required this.recentChat,
-  });
+    DateTime? lastUpdated,
+  }) : lastUpdated = lastUpdated ?? DateTime.now();
+
+  double get currentPosition {
+    if (!isPlaying) return playbackPosition;
+    final elapsedSec = DateTime.now().difference(lastUpdated).inMilliseconds / 1000.0;
+    return playbackPosition + elapsedSec;
+  }
+
+  RoomStateData copyWith({
+    String? roomId,
+    String? hostId,
+    String? mediaId,
+    String? title,
+    String? streamUrl,
+    String? episodeId,
+    double? playbackPosition,
+    bool? isPlaying,
+    List<Participant>? participants,
+    List<ChatMessage>? recentChat,
+    DateTime? lastUpdated,
+  }) {
+    return RoomStateData(
+      roomId: roomId ?? this.roomId,
+      hostId: hostId ?? this.hostId,
+      mediaId: mediaId ?? this.mediaId,
+      title: title ?? this.title,
+      streamUrl: streamUrl ?? this.streamUrl,
+      episodeId: episodeId ?? this.episodeId,
+      playbackPosition: playbackPosition ?? this.playbackPosition,
+      isPlaying: isPlaying ?? this.isPlaying,
+      participants: participants ?? this.participants,
+      recentChat: recentChat ?? this.recentChat,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+    );
+  }
 
   factory RoomStateData.fromJson(Map<String, dynamic> json) {
     final rawParts = (json['participants'] as List<dynamic>?) ?? [];
@@ -86,6 +122,7 @@ class RoomStateData {
       isPlaying: json['is_playing'] ?? false,
       participants: rawParts.map((e) => Participant.fromJson(e)).toList(),
       recentChat: rawChat.map((e) => ChatMessage.fromJson(e)).toList(),
+      lastUpdated: DateTime.now(),
     );
   }
 }

@@ -36,6 +36,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
     _loadTrending();
   }
 
@@ -682,7 +688,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMediaCard(MediaItem item) {
-    final ratingSrc = item.ratingSource ?? 'TMDB';
     final rating = item.rating ?? '7.5';
 
     return InkWell(
@@ -730,15 +735,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
 
-                  // Quality Tag
+                  // Quality Tag (bottom-left to avoid colliding with top rating badge on narrow cards)
                   if (item.quality != null)
                     Positioned(
-                      top: 8,
-                      right: 8,
+                      bottom: 8,
+                      left: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.75),
+                          color: Colors.black.withOpacity(0.8),
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(color: Colors.white24),
                         ),
@@ -746,7 +751,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           item.quality!,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 10,
+                            fontSize: 9.5,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -770,7 +775,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
                           const SizedBox(width: 3),
                           Text(
-                            ' ',
+                            rating,
                             style: const TextStyle(
                               color: Colors.amber,
                               fontSize: 10,

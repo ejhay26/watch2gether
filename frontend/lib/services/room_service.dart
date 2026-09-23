@@ -8,6 +8,9 @@ import 'api_service.dart';
 class RoomService extends ChangeNotifier {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
+  Timer? _reconnectTimer;
+  bool _intentionalDisconnect = false;
+  bool _isReconnecting = false;
 
   String? _currentRoomId;
   String? _userId;
@@ -16,6 +19,7 @@ class RoomService extends ChangeNotifier {
   bool _isConnected = false;
 
   // Playback sync event callbacks
+  ValueChanged<RoomStateData>? onRoomStateReceived;
   Function(double position, int executeAtMs)? onPlayReceived;
   Function(double position)? onPauseReceived;
   Function(double position, int executeAtMs)? onSeekReceived;
@@ -32,7 +36,13 @@ class RoomService extends ChangeNotifier {
     required String userId,
     required String username,
   }) async {
-    disconnect();
+    _reconnectTimer?.cancel();
+    _intentionalDisconnect = false;
+
+    // Disconnect existing without marking as intentional
+    _sub?.cancel();
+    _channel?.sink.close();
+    _channel = null;
 
     _currentRoomId = roomId;
     _userId = userId;
@@ -55,16 +65,35 @@ class RoomService extends ChangeNotifier {
         onError: (err) {
           _isConnected = false;
           notifyListeners();
+          _scheduleReconnect();
         },
         onDone: () {
           _isConnected = false;
           notifyListeners();
+          _scheduleReconnect();
         },
       );
     } catch (e) {
       _isConnected = false;
       notifyListeners();
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_isReconnecting || _intentionalDisconnect || _currentRoomId == null) return;
+    _isReconnecting = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 2), () async {
+      _isReconnecting = false;
+      if (_currentRoomId != null && !_intentionalDisconnect && !_isConnected) {
+        await connect(
+          roomId: _currentRoomId!,
+          userId: _userId ?? '',
+          username: _username ?? 'Viewer',
+        );
+      }
+    });
   }
 
   void _handleIncoming(String raw) {
@@ -77,6 +106,7 @@ class RoomService extends ChangeNotifier {
           if (jsonMap['room_state'] != null) {
             _state = RoomStateData.fromJson(jsonMap['room_state']);
             notifyListeners();
+            onRoomStateReceived?.call(_state!);
           }
           break;
 
@@ -84,17 +114,10 @@ class RoomService extends ChangeNotifier {
           final pos = (jsonMap['position'] as num?)?.toDouble() ?? 0.0;
           final execAt = (jsonMap['execute_at_ms'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
           if (_state != null) {
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
+            _state = _state!.copyWith(
               playbackPosition: pos,
               isPlaying: true,
-              participants: _state!.participants,
-              recentChat: _state!.recentChat,
+              lastUpdated: DateTime.now(),
             );
             notifyListeners();
           }
@@ -104,17 +127,10 @@ class RoomService extends ChangeNotifier {
         case 'PAUSE':
           final pos = (jsonMap['position'] as num?)?.toDouble() ?? 0.0;
           if (_state != null) {
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
+            _state = _state!.copyWith(
               playbackPosition: pos,
               isPlaying: false,
-              participants: _state!.participants,
-              recentChat: _state!.recentChat,
+              lastUpdated: DateTime.now(),
             );
             notifyListeners();
           }
@@ -125,17 +141,9 @@ class RoomService extends ChangeNotifier {
           final pos = (jsonMap['position'] as num?)?.toDouble() ?? 0.0;
           final execAt = (jsonMap['execute_at_ms'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
           if (_state != null) {
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
+            _state = _state!.copyWith(
               playbackPosition: pos,
-              isPlaying: _state!.isPlaying,
-              participants: _state!.participants,
-              recentChat: _state!.recentChat,
+              lastUpdated: DateTime.now(),
             );
             notifyListeners();
           }
@@ -147,17 +155,14 @@ class RoomService extends ChangeNotifier {
           final title = jsonMap['title'] ?? '';
           final streamUrl = jsonMap['stream_url'] ?? '';
           if (_state != null) {
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
+            _state = _state!.copyWith(
               mediaId: mediaId,
               title: title,
               streamUrl: streamUrl,
               episodeId: jsonMap['episode_id'] ?? '',
               playbackPosition: 0.0,
               isPlaying: false,
-              participants: _state!.participants,
-              recentChat: _state!.recentChat,
+              lastUpdated: DateTime.now(),
             );
             notifyListeners();
           }
@@ -175,18 +180,7 @@ class RoomService extends ChangeNotifier {
           );
           if (_state != null) {
             final updatedChat = List<ChatMessage>.from(_state!.recentChat)..add(msg);
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
-              playbackPosition: _state!.playbackPosition,
-              isPlaying: _state!.isPlaying,
-              participants: _state!.participants,
-              recentChat: updatedChat,
-            );
+            _state = _state!.copyWith(recentChat: updatedChat);
             notifyListeners();
           }
           break;
@@ -195,18 +189,7 @@ class RoomService extends ChangeNotifier {
           if (jsonMap['user'] != null && _state != null) {
             final joined = Participant.fromJson(jsonMap['user']);
             final updatedParts = List<Participant>.from(_state!.participants.where((p) => p.id != joined.id))..add(joined);
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
-              playbackPosition: _state!.playbackPosition,
-              isPlaying: _state!.isPlaying,
-              participants: updatedParts,
-              recentChat: _state!.recentChat,
-            );
+            _state = _state!.copyWith(participants: updatedParts);
             notifyListeners();
           }
           break;
@@ -215,18 +198,7 @@ class RoomService extends ChangeNotifier {
           if (jsonMap['user'] != null && _state != null) {
             final leftId = jsonMap['user']['id'];
             final updatedParts = _state!.participants.where((p) => p.id != leftId).toList();
-            _state = RoomStateData(
-              roomId: _state!.roomId,
-              hostId: _state!.hostId,
-              mediaId: _state!.mediaId,
-              title: _state!.title,
-              streamUrl: _state!.streamUrl,
-              episodeId: _state!.episodeId,
-              playbackPosition: _state!.playbackPosition,
-              isPlaying: _state!.isPlaying,
-              participants: updatedParts,
-              recentChat: _state!.recentChat,
-            );
+            _state = _state!.copyWith(participants: updatedParts);
             notifyListeners();
           }
           break;
@@ -234,7 +206,16 @@ class RoomService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  double get currentPosition => _state?.currentPosition ?? 0.0;
+
   void sendPlay(double position) {
+    if (_state != null) {
+      _state = _state!.copyWith(
+        playbackPosition: position,
+        isPlaying: true,
+        lastUpdated: DateTime.now(),
+      );
+    }
     _send({
       'type': 'PLAY',
       'position': position,
@@ -242,6 +223,13 @@ class RoomService extends ChangeNotifier {
   }
 
   void sendPause(double position) {
+    if (_state != null) {
+      _state = _state!.copyWith(
+        playbackPosition: position,
+        isPlaying: false,
+        lastUpdated: DateTime.now(),
+      );
+    }
     _send({
       'type': 'PAUSE',
       'position': position,
@@ -249,6 +237,12 @@ class RoomService extends ChangeNotifier {
   }
 
   void sendSeek(double position) {
+    if (_state != null) {
+      _state = _state!.copyWith(
+        playbackPosition: position,
+        lastUpdated: DateTime.now(),
+      );
+    }
     _send({
       'type': 'SEEK',
       'position': position,
@@ -273,6 +267,10 @@ class RoomService extends ChangeNotifier {
     });
   }
 
+  void requestSync() {
+    _send({'type': 'SYNC_REQUEST'});
+  }
+
   void _send(Map<String, dynamic> data) {
     if (_channel != null && _isConnected) {
       _channel!.sink.add(jsonEncode(data));
@@ -280,6 +278,8 @@ class RoomService extends ChangeNotifier {
   }
 
   void disconnect() {
+    _intentionalDisconnect = true;
+    _reconnectTimer?.cancel();
     _sub?.cancel();
     _channel?.sink.close();
     _channel = null;
@@ -295,4 +295,3 @@ class RoomService extends ChangeNotifier {
     super.dispose();
   }
 }
-

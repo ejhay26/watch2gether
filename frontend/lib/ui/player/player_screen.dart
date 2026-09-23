@@ -77,6 +77,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Timer? _hideControlsTimer;
   Timer? _historyTimer;
+  Timer? _syncCheckTimer;
   bool _controlsVisible = true;
   bool _isFullscreen = false;
   bool _wasMaximizedBeforeFullscreen = false;
@@ -90,9 +91,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _selectedSeason = 1;
   List<int> _availableSeasons = [1];
   List<MediaItem> _recommended = [];
-  int _selectedRightTab = 0; // 0: Episodes (or Up Next), 1: Recommended, 2: Chat
-
-  final FocusNode _keyboardFocusNode = FocusNode();
+  int _selectedRightTab = 0; // 0: Episodes/Up Next, 1: Recommended, 2: Chat
 
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
   bool get _isSeries {
@@ -134,6 +133,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _isFullscreen = f);
       });
     }
+
+    // Register global hardware key listener (independent of widget focus)
+    HardwareKeyboard.instance.addHandler(_handleGlobalKeyEvent);
 
     _startHideControlsTimer();
     _initRoomAndSync();
@@ -333,6 +335,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isChatOpen = true;
     }
 
+    // Handlers for incoming sync events
+    roomService.onRoomStateReceived = (roomState) {
+      if (!mounted) return;
+      // Synchronize join playtime immediately using the live dynamic room position
+      final currentPos = roomState.currentPosition;
+      if (currentPos > 0) {
+        final target = Duration(milliseconds: (currentPos * 1000).toInt());
+        _player.seek(target);
+      }
+      if (roomState.isPlaying) {
+        _player.play();
+      } else {
+        _player.pause();
+      }
+    };
+
     roomService.onPlayReceived = (position, executeAtMs) {
       final now = DateTime.now().millisecondsSinceEpoch;
       final delay = executeAtMs - now;
@@ -358,6 +376,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
     roomService.onSeekReceived = (position, executeAtMs) {
       _player.seek(Duration(milliseconds: (position * 1000).toInt()));
     };
+
+    roomService.onMediaChangedReceived = (mediaId, title, streamUrl) {
+      if (!mounted) return;
+      setState(() {
+        _currentTitle = title;
+        _currentStreamUrl = streamUrl;
+      });
+      _player.open(Media(streamUrl));
+    };
+
+    // Continuous Sync Drift Guard: Checks every 4 seconds to correct drift > 2.5s
+    _syncCheckTimer?.cancel();
+    _syncCheckTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      final rs = Provider.of<RoomService>(context, listen: false);
+      if (!rs.isConnected || rs.state == null) return;
+      final st = rs.state!;
+      if (st.isPlaying) {
+        final targetPos = st.currentPosition;
+        final localPos = _player.state.position.inMilliseconds / 1000.0;
+        final drift = (localPos - targetPos).abs();
+        if (drift > 3.0) {
+          _player.seek(Duration(milliseconds: (targetPos * 1000).toInt()));
+        }
+      }
+    });
   }
 
   void _switchSource(StreamSource source) {
@@ -376,7 +420,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _switchAudioTrack(String trackLabel) async {
     setState(() => _currentAudioTrack = trackLabel);
 
-    // If switching between [DUB] and [SUB] streaming servers
     if (trackLabel.toUpperCase().contains('[DUB]') || trackLabel.toUpperCase().contains('[SUB]')) {
       final isDub = trackLabel.toUpperCase().contains('[DUB]');
       Server? targetSrv;
@@ -461,7 +504,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _isFullscreen = false);
       }
     } else {
-      if (mounted) setState(() => _isFullscreen = !_isFullscreen);
+      final targetFullscreen = !_isFullscreen;
+      setState(() => _isFullscreen = targetFullscreen);
+      if (targetFullscreen) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      }
     }
   }
 
@@ -533,19 +589,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _togglePlayPause() {
+    final roomService = Provider.of<RoomService>(context, listen: false);
     if (_player.state.playing) {
       _player.pause();
-      final roomService = Provider.of<RoomService>(context, listen: false);
       if (roomService.isConnected) {
         roomService.sendPause(_player.state.position.inMilliseconds / 1000.0);
       }
     } else {
       _player.play();
-      final roomService = Provider.of<RoomService>(context, listen: false);
       if (roomService.isConnected) {
         roomService.sendPlay(_player.state.position.inMilliseconds / 1000.0);
       }
     }
+    setState(() {});
     _onUserInteraction();
   }
 
@@ -558,31 +614,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _onUserInteraction();
   }
 
-  void _handleKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.space) {
-        _togglePlayPause();
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        _seek(_player.state.position - const Duration(seconds: 5)); // 5s seek
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _seek(_player.state.position + const Duration(seconds: 5)); // 5s seek
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _player.setVolume((_player.state.volume + 10).clamp(0.0, 100.0));
-        _onUserInteraction();
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _player.setVolume((_player.state.volume - 10).clamp(0.0, 100.0));
-        _onUserInteraction();
-      } else if (event.logicalKey == LogicalKeyboardKey.keyF || event.logicalKey == LogicalKeyboardKey.f11) {
-        _toggleFullscreen();
-      } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-        if (_isFullscreen) {
-          _toggleFullscreen();
-        }
-      } else if (event.logicalKey == LogicalKeyboardKey.keyM) {
-        _player.setVolume(_player.state.volume > 0 ? 0.0 : 100.0);
-        _onUserInteraction();
+  bool _handleGlobalKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    // If an editable text field is currently focused (like typing in chat), let it handle the key
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus != null && primaryFocus.context != null) {
+      final w = primaryFocus.context!.widget;
+      if (w is EditableText) {
+        return false;
       }
     }
+
+    if (event.logicalKey == LogicalKeyboardKey.keyF || event.logicalKey == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.space) {
+      _togglePlayPause();
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_isFullscreen) {
+        _toggleFullscreen();
+        return true;
+      }
+    } else if (event.logicalKey == LogicalKeyboardKey.keyM) {
+      _player.setVolume(_player.state.volume > 0 ? 0.0 : 100.0);
+      _onUserInteraction();
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _seek(_player.state.position - const Duration(seconds: 5));
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _seek(_player.state.position + const Duration(seconds: 5));
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _player.setVolume((_player.state.volume + 10).clamp(0.0, 100.0));
+      _onUserInteraction();
+      return true;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _player.setVolume((_player.state.volume - 10).clamp(0.0, 100.0));
+      _onUserInteraction();
+      return true;
+    }
+    return false;
   }
 
   Future<void> _handleBack() async {
@@ -621,7 +695,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _hideControlsTimer?.cancel();
     _historyTimer?.cancel();
-    _keyboardFocusNode.dispose();
+    _syncCheckTimer?.cancel();
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKeyEvent);
+
     if (!_disposedForPiP) {
       _player.dispose();
     }
@@ -632,8 +708,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (_wasMaximizedBeforeFullscreen) windowManager.maximize();
         }
       });
+    } else {
+      // Restore mobile orientations
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     super.dispose();
+  }
+
+  void _openMobileChatSheet(RoomService roomService) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF13151F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.65,
+          child: RoomChatDrawer(
+            roomService: roomService,
+            onClose: () => Navigator.pop(ctx),
+          ),
+        ),
+      ),
+    );
   }
 
   // --- UI Building Blocks ---
@@ -650,10 +753,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               if (_controlsVisible) _startHideControlsTimer();
             },
             onDoubleTapLeft: () {
-              _seek(_player.state.position - const Duration(seconds: 5)); // 5s seek
+              _seek(_player.state.position - const Duration(seconds: 5));
             },
             onDoubleTapRight: () {
-              _seek(_player.state.position + const Duration(seconds: 5)); // 5s seek
+              _seek(_player.state.position + const Duration(seconds: 5));
             },
             child: Stack(
               alignment: Alignment.center,
@@ -693,65 +796,81 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
 
-          // HUD Overlay
-          StreamBuilder<Duration>(
-            stream: _player.stream.position,
-            builder: (context, snapshotPos) {
-              final position = snapshotPos.data ?? Duration.zero;
-              final duration = _player.state.duration;
-              final isPlaying = _player.state.playing;
-              final volume = _player.state.volume / 100.0;
+          // HUD Overlay with Reactive Play/Pause stream
+          StreamBuilder<bool>(
+            stream: _player.stream.playing,
+            initialData: _player.state.playing,
+            builder: (context, snapshotPlaying) {
+              final isPlaying = snapshotPlaying.data ?? _player.state.playing;
 
-              return DesktopHUD(
-                isVisible: _controlsVisible,
-                title: _currentTitle,
-                subtitle: _currentSubtitle,
-                isPlaying: isPlaying,
-                position: position,
-                duration: duration,
-                volume: volume,
-                isMuted: volume == 0.0,
-                isFullscreen: _isFullscreen,
-                isRoom: isRoomActive,
-                roomCode: _currentRoomCode ?? roomService.currentRoomId,
-                participantCount: roomService.state?.participants.length ?? 1,
-                isChatOpen: _isChatOpen,
-                hasEpisodes: _isSeries,
-                isEpisodesOpen: _isEpisodesOpen,
-                streamResult: _currentStreamResult,
-                currentQuality: _currentQuality,
-                currentAudioTrack: _currentAudioTrack,
-                currentSubtitle: _currentSubtitleTrack,
-                availableAudioTracks: _availableAudioTracks,
-                availableSubtitles: _availableSubtitles,
-                onPlayPause: _togglePlayPause,
-                onSeek: _seek,
-                onVolumeChange: (val) {
-                  _player.setVolume(val * 100.0);
-                  _onUserInteraction();
+              return StreamBuilder<Duration>(
+                stream: _player.stream.position,
+                builder: (context, snapshotPos) {
+                  final position = snapshotPos.data ?? Duration.zero;
+                  final duration = _player.state.duration;
+                  final volume = _player.state.volume / 100.0;
+
+                  return DesktopHUD(
+                    isVisible: _controlsVisible,
+                    title: _currentTitle,
+                    subtitle: _currentSubtitle,
+                    isPlaying: isPlaying,
+                    position: position,
+                    duration: duration,
+                    volume: volume,
+                    isMuted: volume == 0.0,
+                    isFullscreen: _isFullscreen,
+                    isRoom: isRoomActive,
+                    roomCode: _currentRoomCode ?? roomService.currentRoomId,
+                    participantCount: roomService.state?.participants.length ?? 1,
+                    isChatOpen: _isChatOpen,
+                    hasEpisodes: _isSeries,
+                    isEpisodesOpen: _isEpisodesOpen,
+                    streamResult: _currentStreamResult,
+                    currentQuality: _currentQuality,
+                    currentAudioTrack: _currentAudioTrack,
+                    currentSubtitle: _currentSubtitleTrack,
+                    availableAudioTracks: _availableAudioTracks,
+                    availableSubtitles: _availableSubtitles,
+                    onPlayPause: _togglePlayPause,
+                    onSeek: _seek,
+                    onVolumeChange: (val) {
+                      _player.setVolume(val * 100.0);
+                      _onUserInteraction();
+                    },
+                    onToggleMute: () {
+                      _player.setVolume(volume > 0 ? 0.0 : 100.0);
+                      _onUserInteraction();
+                    },
+                    onToggleFullscreen: _toggleFullscreen,
+                    onToggleChat: () {
+                      final isMobile = MediaQuery.of(context).size.width < 700;
+                      if (isMobile && !_isFullscreen) {
+                        _openMobileChatSheet(roomService);
+                      } else if (!_isFullscreen && _isDesktop) {
+                        setState(() {
+                          _selectedRightTab = (_selectedRightTab == 2 ? 1 : 2);
+                        });
+                      } else {
+                        setState(() {
+                          _isChatOpen = !_isChatOpen;
+                          if (_isChatOpen) _isEpisodesOpen = false;
+                        });
+                      }
+                    },
+                    onToggleEpisodes: () {
+                      setState(() {
+                        _isEpisodesOpen = !_isEpisodesOpen;
+                        if (_isEpisodesOpen) _isChatOpen = false;
+                      });
+                    },
+                    onBack: _handleBack,
+                    onCreateRoom: _createRoomOnDemand,
+                    onSelectQuality: _switchSource,
+                    onSelectAudioTrack: _switchAudioTrack,
+                    onSelectSubtitle: _switchSubtitle,
+                  );
                 },
-                onToggleMute: () {
-                  _player.setVolume(volume > 0 ? 0.0 : 100.0);
-                  _onUserInteraction();
-                },
-                onToggleFullscreen: _toggleFullscreen,
-                onToggleChat: () {
-                  setState(() {
-                    _isChatOpen = !_isChatOpen;
-                    if (_isChatOpen) _isEpisodesOpen = false;
-                  });
-                },
-                onToggleEpisodes: () {
-                  setState(() {
-                    _isEpisodesOpen = !_isEpisodesOpen;
-                    if (_isEpisodesOpen) _isChatOpen = false;
-                  });
-                },
-                onBack: _handleBack,
-                onCreateRoom: _createRoomOnDemand,
-                onSelectQuality: _switchSource,
-                onSelectAudioTrack: _switchAudioTrack,
-                onSelectSubtitle: _switchSubtitle,
               );
             },
           ),
@@ -806,7 +925,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Thumbnail
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Container(
@@ -823,7 +941,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -874,15 +991,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final showChat = isRoomActive && _isChatOpen;
     final showEpisodes = _isEpisodesOpen;
     final hasSidebar = showChat || showEpisodes;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 700;
 
+    if (isMobile) {
+      // Mobile Overlay Drawer (does not squeeze 16:9 video or overflow)
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: _buildVideoPlayerWithHUD(roomService, isRoomActive),
+          ),
+          if (hasSidebar)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 300,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF13151F).withOpacity(0.96),
+                  border: const Border(left: BorderSide(color: AppColors.surfaceBorder)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.6),
+                      blurRadius: 20,
+                    ),
+                  ],
+                ),
+                child: showEpisodes
+                    ? _buildEpisodesDrawer()
+                    : RoomChatDrawer(
+                        roomService: roomService,
+                        onClose: () => setState(() => _isChatOpen = false),
+                      ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    // Desktop Two-Pane Side-by-Side in Fullscreen
     return Row(
       children: [
-        // Video Player Pane: smoothly resizes/sets aside to the left when sidebar opens
         Expanded(
           child: _buildVideoPlayerWithHUD(roomService, isRoomActive),
         ),
-
-        // Animated Sidebar Pane (Two-Pane Side-by-Side in Fullscreen)
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
           curve: Curves.easeInOut,
@@ -916,13 +1069,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Left Column: Video Player + Title & Metadata
         Expanded(
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 16:9 Video Player Container
                 AspectRatio(
                   aspectRatio: 16 / 9,
                   child: Container(
@@ -930,8 +1081,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     child: _buildVideoPlayerWithHUD(roomService, isRoomActive),
                   ),
                 ),
-
-                // Video Details Header
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   child: Column(
@@ -970,158 +1119,132 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          if (_isSeries)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceBorder,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                _isAnime ? 'Anime Series' : 'TV Series',
-                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 11),
-                              ),
-                            ),
                           const Spacer(),
-                          // Watch Party Button
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.surfaceElevated,
-                              foregroundColor: AppColors.accent,
-                              side: const BorderSide(color: AppColors.accent, width: 1),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          if (!isRoomActive)
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.accent.withOpacity(0.15),
+                                foregroundColor: AppColors.accent,
+                                elevation: 0,
+                                side: const BorderSide(color: AppColors.accent),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              ),
+                              icon: const Icon(Icons.group_add_rounded, size: 18),
+                              label: const Text('Watch Party'),
+                              onPressed: _createRoomOnDemand,
                             ),
-                            icon: const Icon(Icons.group_add_rounded, size: 16),
-                            label: const Text('Watch Party', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            onPressed: _createRoomOnDemand,
-                          ),
                         ],
                       ),
-
-                      // Seasons & Responsive Episode Grid (Below Minimized Player)
-                      if (_isSeries) ...[
-                        const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Seasons & Episodes',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            if (_availableSeasons.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceElevated,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: AppColors.surfaceBorder),
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<int>(
-                                    value: _selectedSeason,
-                                    dropdownColor: AppColors.surfaceElevated,
-                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                    icon: const Icon(Icons.arrow_drop_down, color: AppColors.accent, size: 20),
-                                    items: _availableSeasons.map((s) => DropdownMenuItem(value: s, child: Text('Season $s'))).toList(),
-                                    onChanged: (val) {
-                                      if (val != null) {
-                                        setState(() => _selectedSeason = val);
-                                        _loadSeriesData();
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        _loadingEpisodes
-                            ? const Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: Center(child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2)),
-                              )
-                            : _episodes.isEmpty
-                                ? const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 8),
-                                    child: Text('No episodes found.', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                                  )
-                                : Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: _episodes.map((ep) {
-                                      final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && ep == _episodes.first);
-                                      return Tooltip(
-                                        message: ep.title.isNotEmpty ? ep.title : 'Episode ${ep.number}',
-                                        child: InkWell(
-                                          onTap: () => _selectEpisode(ep),
-                                          borderRadius: BorderRadius.circular(8),
-                                          child: Container(
-                                            width: 58,
-                                            height: 46,
-                                            decoration: BoxDecoration(
-                                              color: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
-                                              borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(
-                                                color: isPlaying ? AppColors.accentBright : AppColors.surfaceBorder,
-                                                width: isPlaying ? 1.5 : 1.0,
-                                              ),
-                                            ),
-                                            child: Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                  '${ep.number}',
-                                                  style: TextStyle(
-                                                    color: isPlaying ? Colors.white : AppColors.textPrimary,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 14,
-                                                  ),
-                                                ),
-                                                if (isPlaying)
-                                                  Container(
-                                                    margin: const EdgeInsets.only(top: 2),
-                                                    width: 14,
-                                                    height: 2,
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white,
-                                                      borderRadius: BorderRadius.circular(1),
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
-                      ],
                     ],
                   ),
                 ),
+
+                // TV Series Seasons & Episodes Grid
+                if (_isSeries) ...[
+                  const Divider(color: Colors.white10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Seasons & Episodes',
+                          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 16),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceElevated,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: _selectedSeason,
+                              dropdownColor: AppColors.surfaceElevated,
+                              icon: const Icon(Icons.arrow_drop_down, color: AppColors.accent),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              items: _availableSeasons.map((s) {
+                                return DropdownMenuItem<int>(
+                                  value: s,
+                                  child: Text('Season $s'),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null && val != _selectedSeason) {
+                                  setState(() => _selectedSeason = val);
+                                  _loadSeriesData();
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _loadingEpisodes
+                        ? const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: AppColors.accent)))
+                        : _episodes.isEmpty
+                            ? const Padding(padding: EdgeInsets.all(16), child: Text('No episodes found.', style: TextStyle(color: AppColors.textSecondary)))
+                            : GridView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 6,
+                                  childAspectRatio: 1.4,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                ),
+                                itemCount: _episodes.length,
+                                itemBuilder: (ctx, idx) {
+                                  final ep = _episodes[idx];
+                                  final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && idx == 0);
+                                  return InkWell(
+                                    borderRadius: BorderRadius.circular(8),
+                                    onTap: () => _selectEpisode(ep),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: isPlaying ? AppColors.accent : Colors.white12,
+                                        ),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        'EP ${ep.number}',
+                                        style: TextStyle(
+                                          color: isPlaying ? Colors.black : Colors.white,
+                                          fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
               ],
             ),
           ),
         ),
 
-        // Right Column: Side Panel (Episodes / Recommended / Chat)
+        // Right Sidebar: Tabs for Recommended & Chat
         Container(
-          width: 380,
+          width: 360,
           decoration: const BoxDecoration(
             color: AppColors.surface,
             border: Border(left: BorderSide(color: AppColors.surfaceBorder)),
           ),
           child: Column(
             children: [
-              // Sidebar Header (Up Next / Recommended Films)
               Container(
+                height: 48,
                 decoration: const BoxDecoration(
-                  color: AppColors.surfaceElevated,
                   border: Border(bottom: BorderSide(color: AppColors.surfaceBorder)),
                 ),
                 child: Row(
@@ -1130,23 +1253,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       child: InkWell(
                         onTap: () => setState(() => _selectedRightTab = 1),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
                             border: Border(
                               bottom: BorderSide(
-                                color: _selectedRightTab != 2 ? AppColors.accent : Colors.transparent,
+                                color: _selectedRightTab == 1 ? AppColors.accent : Colors.transparent,
                                 width: 2,
                               ),
                             ),
                           ),
-                          child: Center(
-                            child: Text(
-                              'Recommended',
-                              style: TextStyle(
-                                color: _selectedRightTab != 2 ? AppColors.accent : Colors.white70,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          child: Text(
+                            'Recommended',
+                            style: TextStyle(
+                              color: _selectedRightTab == 1 ? AppColors.accent : Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
@@ -1157,7 +1278,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         child: InkWell(
                           onTap: () => setState(() => _selectedRightTab = 2),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            alignment: Alignment.center,
                             decoration: BoxDecoration(
                               border: Border(
                                 bottom: BorderSide(
@@ -1166,14 +1287,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 ),
                               ),
                             ),
-                            child: Center(
-                              child: Text(
-                                'Chat',
-                                style: TextStyle(
-                                  color: _selectedRightTab == 2 ? AppColors.accent : Colors.white70,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                            child: Text(
+                              'Chat',
+                              style: TextStyle(
+                                color: _selectedRightTab == 2 ? AppColors.accent : Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),
@@ -1205,7 +1324,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // --- Layout: YouTube-Style Mobile / Narrow View ---
   Widget _buildYouTubeMobileLayout(RoomService roomService, bool isRoomActive) {
-    return Column(
+    return SafeArea(
+      bottom: false,
+      child: Column(
       children: [
         // Top 16:9 Video Player (Sticky)
         AspectRatio(
@@ -1246,10 +1367,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
 
+                // Live Chat Bar on Mobile if Room is Active
+                if (isRoomActive)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _openMobileChatSheet(roomService),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceElevated,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.surfaceBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.chat_bubble_outline_rounded, color: AppColors.accent, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Watch Party Chat (${roomService.state?.recentChat.length ?? 0})',
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                            const Spacer(),
+                            const Text('Open', style: TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.accent, size: 12),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
                 // Quick Episodes row if series
                 if (_isSeries && _episodes.isNotEmpty) ...[
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -1313,6 +1466,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
       ],
+    ),
     );
   }
 
@@ -1321,23 +1475,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final roomService = Provider.of<RoomService>(context);
     final isRoomActive = roomService.isConnected || (_currentRoomCode != null && _currentRoomCode!.isNotEmpty);
 
-    return KeyboardListener(
-      focusNode: _keyboardFocusNode,
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: _isFullscreen
-            ? _buildFullscreenLayout(roomService, isRoomActive)
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth >= 950) {
-                    return _buildYouTubeDesktopLayout(roomService, isRoomActive);
-                  }
-                  return _buildYouTubeMobileLayout(roomService, isRoomActive);
-                },
-              ),
-      ),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: _isFullscreen
+          ? _buildFullscreenLayout(roomService, isRoomActive)
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 950) {
+                  return _buildYouTubeDesktopLayout(roomService, isRoomActive);
+                }
+                return _buildYouTubeMobileLayout(roomService, isRoomActive);
+              },
+            ),
     );
   }
 }
