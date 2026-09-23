@@ -13,6 +13,7 @@ import '../../models/media_item.dart' hide SubtitleTrack;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/room_service.dart';
+import '../../services/playback_service.dart';
 import '../auth/auth_guard.dart';
 import 'desktop_hud.dart';
 import 'episodes_drawer.dart';
@@ -27,6 +28,8 @@ class PlayerScreen extends StatefulWidget {
   final String? episodeId;
   final String? initialRoomCode;
   final StreamResult? streamResult;
+  final Player? existingPlayer;
+  final VideoController? existingController;
 
   const PlayerScreen({
     super.key,
@@ -37,6 +40,8 @@ class PlayerScreen extends StatefulWidget {
     this.episodeId,
     this.initialRoomCode,
     this.streamResult,
+    this.existingPlayer,
+    this.existingController,
   });
 
   @override
@@ -59,6 +64,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<Server> _availableServers = [];
   List<String> _availableSubtitles = ['Off'];
   StreamResult? _currentStreamResult;
+  MediaItem? _details;
+  bool _disposedForPiP = false;
+
+  bool get _isAnime {
+    if (widget.mediaId.startsWith('anime-')) return true;
+    final genres = _details?.genres ?? [];
+    if (genres.any((g) => g.toLowerCase().contains('anime'))) return true;
+    final yr = _details?.year ?? '';
+    return yr.toLowerCase().contains('anime');
+  }
 
   Timer? _hideControlsTimer;
   Timer? _historyTimer;
@@ -95,10 +110,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentRoomCode = widget.initialRoomCode;
     _currentStreamResult = widget.streamResult;
 
-    _player = Player();
-    _controller = VideoController(_player);
-
-    _openMedia(_currentStreamUrl, headers: widget.streamResult?.headers);
+    if (widget.existingPlayer != null && widget.existingController != null) {
+      _player = widget.existingPlayer!;
+      _controller = widget.existingController!;
+    } else {
+      _player = Player();
+      _controller = VideoController(_player);
+      _openMedia(_currentStreamUrl, headers: widget.streamResult?.headers);
+    }
 
     _player.stream.buffering.listen((buffering) {
       if (mounted) setState(() => _isBuffering = buffering);
@@ -140,15 +159,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _refreshAudioTracks() {
-    final audioList = <String>[];
+    final audioSet = <String>{};
 
-    // External Dub / Sub stream servers (for anime / series)
-    for (final s in _availableServers) {
-      if (s.name.toUpperCase().contains('[DUB]')) {
-        audioList.add('[DUB] English Dub');
-      } else if (s.name.toUpperCase().contains('[SUB]')) {
-        audioList.add('[SUB] Japanese Audio');
+    if (_isAnime) {
+      bool hasSub = false;
+      bool hasDub = false;
+      for (final s in _availableServers) {
+        if (s.name.toUpperCase().contains('[DUB]')) hasDub = true;
+        if (s.name.toUpperCase().contains('[SUB]')) hasSub = true;
       }
+      if (hasSub) audioSet.add('[SUB] Japanese Audio');
+      if (hasDub) audioSet.add('[DUB] English Dub');
+    } else {
+      audioSet.add('Original Audio (English)');
     }
 
     // Native player audio streams
@@ -158,10 +181,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       String lang = a.language ?? '';
       String title = a.title ?? '';
       if (title.isNotEmpty && title.toLowerCase() != 'track') {
-        audioList.add('Track ${i + 1}: $title');
+        audioSet.add(title);
         continue;
       }
-      String displayLang = 'English (Stereo)';
+      String displayLang = 'English';
       if (lang.toLowerCase() == 'en' || lang.toLowerCase() == 'eng') {
         displayLang = 'English';
       } else if (lang.toLowerCase() == 'ja' || lang.toLowerCase() == 'jpn') {
@@ -173,9 +196,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } else if (lang.toLowerCase() == 'de' || lang.toLowerCase() == 'deu') {
         displayLang = 'German';
       }
-      audioList.add('Track ${i + 1}: $displayLang');
+      if (tracks.length > 1) {
+        audioSet.add('$displayLang (Track ${i + 1})');
+      } else {
+        audioSet.add(displayLang);
+      }
     }
 
+    final audioList = audioSet.toList();
     if (audioList.isEmpty) {
       audioList.add('Default');
     }
@@ -207,6 +235,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (widget.mediaId.isEmpty) return;
     setState(() => _loadingEpisodes = true);
     try {
+      if (_details == null) {
+        final d = await ApiService().getDetails(widget.mediaId);
+        if (d != null && mounted) {
+          setState(() {
+            _details = d;
+            if (d.seasons != null && d.seasons!.isNotEmpty) {
+              _availableSeasons = d.seasons!;
+            }
+          });
+          _refreshAudioTracks();
+        }
+      }
       final eps = await ApiService().getEpisodes(widget.mediaId, season: _selectedSeason);
       if (mounted) {
         setState(() {
@@ -221,7 +261,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _loadRecommended() async {
     try {
-      final items = await ApiService().getTrending();
+      final items = await ApiService().getRecommendations(widget.mediaId);
       if (mounted) {
         setState(() {
           _recommended = items.where((m) => m.id != widget.mediaId).toList();
@@ -532,7 +572,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         _player.setVolume((_player.state.volume - 10).clamp(0.0, 100.0));
         _onUserInteraction();
-      } else if (event.logicalKey == LogicalKeyboardKey.keyF) {
+      } else if (event.logicalKey == LogicalKeyboardKey.keyF || event.logicalKey == LogicalKeyboardKey.f11) {
         _toggleFullscreen();
       } else if (event.logicalKey == LogicalKeyboardKey.escape) {
         if (_isFullscreen) {
@@ -545,12 +585,54 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  Future<void> _handleBack() async {
+    final playbackService = Provider.of<PlaybackService>(context, listen: false);
+
+    if (_isDesktop) {
+      final isFull = await windowManager.isFullScreen();
+      if (isFull) {
+        await windowManager.setFullScreen(false);
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (_wasMaximizedBeforeFullscreen) {
+          await windowManager.maximize();
+        }
+      }
+    }
+
+    // Hand over active player to floating mini-player if playing
+    if (_player.state.playing && mounted) {
+      playbackService.startFloating(
+        activePlayer: _player,
+        activeController: _controller,
+        activeMediaId: widget.mediaId,
+        activeEpisodeId: _currentEpisodeId,
+        activeTitle: _currentTitle,
+        activeSubtitle: _currentSubtitle,
+        activeStreamUrl: _currentStreamUrl,
+        activeStreamResult: _currentStreamResult,
+      );
+      _disposedForPiP = true;
+    }
+
+    if (mounted) Navigator.of(context).pop();
+  }
+
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
     _historyTimer?.cancel();
     _keyboardFocusNode.dispose();
-    _player.dispose();
+    if (!_disposedForPiP) {
+      _player.dispose();
+    }
+    if (_isDesktop) {
+      windowManager.isFullScreen().then((f) {
+        if (f) {
+          windowManager.setFullScreen(false);
+          if (_wasMaximizedBeforeFullscreen) windowManager.maximize();
+        }
+      });
+    }
     super.dispose();
   }
 
@@ -665,7 +747,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     if (_isEpisodesOpen) _isChatOpen = false;
                   });
                 },
-                onBack: () => Navigator.of(context).pop(),
+                onBack: _handleBack,
                 onCreateRoom: _createRoomOnDemand,
                 onSelectQuality: _switchSource,
                 onSelectAudioTrack: _switchAudioTrack,
@@ -789,54 +871,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // --- Layout: Fullscreen Mode ---
   Widget _buildFullscreenLayout(RoomService roomService, bool isRoomActive) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _buildVideoPlayerWithHUD(roomService, isRoomActive),
+    final showChat = isRoomActive && _isChatOpen;
+    final showEpisodes = _isEpisodesOpen;
+    final hasSidebar = showChat || showEpisodes;
 
-        // Sliding Room Chat Drawer with Click Isolation
-        Positioned(
-          top: 0,
-          right: 0,
-          bottom: 0,
-          child: IgnorePointer(
-            ignoring: !(isRoomActive && _isChatOpen),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeInOut,
-              width: isRoomActive && _isChatOpen ? 340 : 0,
-              child: OverflowBox(
-                minWidth: 340,
-                maxWidth: 340,
-                alignment: Alignment.topRight,
-                child: (isRoomActive && _isChatOpen)
-                    ? RoomChatDrawer(
-                        roomService: roomService,
-                        onClose: () => setState(() => _isChatOpen = false),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ),
-          ),
+    return Row(
+      children: [
+        // Video Player Pane: smoothly resizes/sets aside to the left when sidebar opens
+        Expanded(
+          child: _buildVideoPlayerWithHUD(roomService, isRoomActive),
         ),
 
-        // Sliding Episodes Drawer with Click Isolation
-        Positioned(
-          top: 0,
-          right: 0,
-          bottom: 0,
-          child: IgnorePointer(
-            ignoring: !_isEpisodesOpen,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeInOut,
-              width: _isEpisodesOpen ? 340 : 0,
-              child: OverflowBox(
-                minWidth: 340,
-                maxWidth: 340,
-                alignment: Alignment.topRight,
-                child: _isEpisodesOpen ? _buildEpisodesDrawer() : const SizedBox.shrink(),
-              ),
+        // Animated Sidebar Pane (Two-Pane Side-by-Side in Fullscreen)
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeInOut,
+          width: hasSidebar ? 360 : 0,
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            border: Border(left: BorderSide(color: AppColors.surfaceBorder)),
+          ),
+          child: ClipRect(
+            child: OverflowBox(
+              minWidth: 360,
+              maxWidth: 360,
+              alignment: Alignment.topRight,
+              child: hasSidebar
+                  ? (showEpisodes
+                      ? _buildEpisodesDrawer()
+                      : RoomChatDrawer(
+                          roomService: roomService,
+                          onClose: () => setState(() => _isChatOpen = false),
+                        ))
+                  : const SizedBox.shrink(),
             ),
           ),
         ),
@@ -912,7 +979,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                'Series / Anime',
+                                _isAnime ? 'Anime Series' : 'TV Series',
                                 style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 11),
                               ),
                             ),
@@ -947,7 +1014,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            if (_availableSeasons.length > 1)
+                            if (_availableSeasons.isNotEmpty)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                                 decoration: BoxDecoration(
@@ -1074,7 +1141,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                           child: Center(
                             child: Text(
-                              'Up Next',
+                              'Recommended',
                               style: TextStyle(
                                 color: _selectedRightTab != 2 ? AppColors.accent : Colors.white70,
                                 fontSize: 13,
@@ -1231,7 +1298,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Text(
-                    'Up Next',
+                    'Recommended',
                     style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                 ),

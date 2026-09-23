@@ -254,19 +254,18 @@ func (m *Manager) GetEpisodes(id string, season int) ([]Episode, error) {
 	return m.flixhq.GetEpisodes(id, season)
 }
 
+func (m *Manager) GetRecommendations(id string) ([]MediaItem, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	if strings.HasPrefix(id, "anime-") {
+		return m.animeEngine.GetTrending(ctx)
+	}
+	return m.catalogEngine.GetRecommendations(ctx, id)
+}
+
 func (m *Manager) GetServers(episodeId string) ([]Server, error) {
-	if strings.HasPrefix(episodeId, "anime-") {
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		defer cancel()
-		return m.animeEngine.GetServers(ctx, episodeId)
-	}
-	if strings.HasPrefix(episodeId, "demo-") {
-		return m.demo.GetServers(episodeId)
-	}
-	if strings.HasPrefix(episodeId, "tmdb-") {
-		return m.videoEngine.GetServers(episodeId, "")
-	}
-	return m.flixhq.GetServers(episodeId)
+	return m.GetServersWithTitle(episodeId, "")
 }
 
 func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server, error) {
@@ -278,38 +277,21 @@ func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server,
 	if strings.HasPrefix(episodeId, "demo-") {
 		return m.demo.GetServers(episodeId)
 	}
-	if strings.HasPrefix(episodeId, "tmdb-") {
-		return m.videoEngine.GetServers(episodeId, title)
+	if strings.HasPrefix(episodeId, "tmdb-") || strings.HasPrefix(episodeId, "movie-") || strings.HasPrefix(episodeId, "archive-") || title != "" || !strings.Contains(episodeId, "flix") {
+		srvs, err := m.videoEngine.GetServers(episodeId, title)
+		if err == nil && len(srvs) > 0 {
+			return srvs, nil
+		}
 	}
-	return m.flixhq.GetServers(episodeId)
+	srvs, err := m.flixhq.GetServers(episodeId)
+	if err == nil && len(srvs) > 0 {
+		return srvs, nil
+	}
+	return m.videoEngine.GetServers(episodeId, title)
 }
 
 func (m *Manager) GetStream(serverId string) (*StreamResult, error) {
-	if strings.HasPrefix(serverId, "anime-") {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		return m.animeEngine.GetStream(ctx, serverId)
-	}
-	if strings.HasPrefix(serverId, "demo-") {
-		return m.demo.GetStream(serverId)
-	}
-	if strings.HasPrefix(serverId, "tmdb-") {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-
-		stream, err := m.videoEngine.GetStream(ctx, serverId, "")
-		if err != nil {
-			return nil, err
-		}
-
-		if len(stream.Subtitles) == 0 {
-			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, "")
-			stream.Subtitles = subs
-		}
-
-		return stream, nil
-	}
-	return m.flixhq.GetStream(serverId)
+	return m.GetStreamWithTitle(serverId, "")
 }
 
 func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResult, error) {
@@ -321,21 +303,24 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 	if strings.HasPrefix(serverId, "demo-") {
 		return m.demo.GetStream(serverId)
 	}
-	if strings.HasPrefix(serverId, "tmdb-") {
+	if strings.HasPrefix(serverId, "tmdb-") || strings.HasPrefix(serverId, "movie-") || strings.Contains(serverId, "-srv-") || strings.HasPrefix(serverId, "archive-") || title != "" || !strings.Contains(serverId, "flix") {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
 		stream, err := m.videoEngine.GetStream(ctx, serverId, title)
-		if err != nil {
-			return nil, err
+		if err == nil && stream != nil && len(stream.Sources) > 0 {
+			if len(stream.Subtitles) == 0 {
+				subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
+				stream.Subtitles = subs
+			}
+			return stream, nil
 		}
-
-		if len(stream.Subtitles) == 0 {
-			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
-			stream.Subtitles = subs
-		}
-
+	}
+	stream, err := m.flixhq.GetStream(serverId)
+	if err == nil && stream != nil && len(stream.Sources) > 0 {
 		return stream, nil
 	}
-	return m.flixhq.GetStream(serverId)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	return m.videoEngine.GetStream(ctx, serverId, title)
 }

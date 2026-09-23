@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'constants/theme.dart';
 import 'services/auth_service.dart';
 import 'services/room_service.dart';
+import 'services/playback_service.dart';
 import 'ui/home_screen.dart';
 
 void main() async {
@@ -35,6 +36,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => RoomService()),
+        ChangeNotifierProvider(create: (_) => PlaybackService()),
       ],
       child: const Watch2GetherApp(),
     ),

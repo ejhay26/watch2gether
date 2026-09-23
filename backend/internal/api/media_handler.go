@@ -22,6 +22,7 @@ func (h *MediaHandler) RegisterRoutes(router fiber.Router) {
 
 	api.Get("/health", h.Health)
 	api.Get("/trending", h.GetTrending)
+	api.Get("/recommendations", h.GetRecommendations)
 	api.Get("/search", h.Search)
 	api.Get("/details", h.GetDetails)
 	api.Get("/episodes", h.GetEpisodes)
@@ -39,6 +40,40 @@ func (h *MediaHandler) Health(c *fiber.Ctx) error {
 }
 
 func (h *MediaHandler) GetTrending(c *fiber.Ctx) error {
+	items, err := h.scraper.GetTrending()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(fiber.Map{
+		"items": items,
+	})
+}
+
+func (h *MediaHandler) GetRecommendations(c *fiber.Ctx) error {
+	mediaID := c.Query("id")
+	if mediaID == "" {
+		items, err := h.scraper.GetTrending()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(fiber.Map{
+			"items": items,
+		})
+	}
+
+	if mgr, ok := h.scraper.(*scraper.Manager); ok {
+		items, err := mgr.GetRecommendations(mediaID)
+		if err == nil && len(items) > 0 {
+			return c.JSON(fiber.Map{
+				"items": items,
+			})
+		}
+	}
+
 	items, err := h.scraper.GetTrending()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

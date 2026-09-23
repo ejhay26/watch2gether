@@ -30,14 +30,17 @@ type VerifiedFilm struct {
 }
 
 type ArchiveProvider struct {
-	mu     sync.RWMutex
-	films  map[string]VerifiedFilm
-	client *http.Client
+	mu           sync.RWMutex
+	staticFilms  map[string]VerifiedFilm
+	staticList   []VerifiedFilm
+	dynamicCache map[string]VerifiedFilm
+	client       *http.Client
 }
 
 func NewArchiveProvider() *ArchiveProvider {
 	p := &ArchiveProvider{
-		films: make(map[string]VerifiedFilm),
+		staticFilms:  make(map[string]VerifiedFilm),
+		dynamicCache: make(map[string]VerifiedFilm),
 		client: &http.Client{
 			Timeout: 8 * time.Second,
 		},
@@ -470,9 +473,32 @@ func (p *ArchiveProvider) initRegistry() {
 		},
 	}
 
+	list = append(list, VerifiedFilm{
+			TMDBID:   "2109",
+			Title:    "Rush Hour",
+			Year:     "1998",
+			Duration: "1h 38m",
+			Rating:   "7.1",
+			Overview: "When Hong Kong Inspector Lee is summoned to Los Angeles to investigate a kidnapping, the FBI assigns cocky LAPD Detective James Carter to distract Lee from the case. Lee and Carter form an unlikely partnership and investigate the case themselves.",
+			Poster:   "https://image.tmdb.org/t/p/w500/nwPhAsfnb7f46bZkWLG7IRP5HXr.jpg",
+			Banner:   "https://image.tmdb.org/t/p/w1280/9FrpAtF87VKblKkDEiIZzYgO40K.jpg",
+			Sources: []model.Source{
+				{
+					URL:     "https://archive.org/download/rush.-hour.-1998.1080p.-blu-ray.x-264.-aac-5.1-yts.-mx/Rush.Hour.1998.1080p.BluRay.x264.AAC5.1-%5BYTS.MX%5D.mp4",
+					Quality: "1080p Blu-Ray Remaster",
+					IsM3U8:  false,
+				},
+			},
+			Subtitles: []model.Subtitle{
+				{URL: "", Lang: "English (Embedded)"},
+			},
+			AudioTracks: []string{"English 5.1 Surround (Original Dialogue)"},
+		},)
+
+	p.staticList = list
 	for _, film := range list {
-		p.films[film.TMDBID] = film
-		p.films[strings.ToLower(strings.TrimSpace(film.Title))] = film
+		p.staticFilms[film.TMDBID] = film
+		p.staticFilms[strings.ToLower(strings.TrimSpace(film.Title))] = film
 	}
 }
 
@@ -486,13 +512,19 @@ func (p *ArchiveProvider) Match(mediaID string, title string) (*VerifiedFilm, bo
 		cleanID = parts[2]
 	}
 
-	if f, ok := p.films[cleanID]; ok {
+	if f, ok := p.staticFilms[cleanID]; ok {
+		return &f, true
+	}
+	if f, ok := p.dynamicCache[cleanID]; ok {
 		return &f, true
 	}
 
 	cleanTitle := strings.ToLower(strings.TrimSpace(title))
 	if cleanTitle != "" {
-		if f, ok := p.films[cleanTitle]; ok {
+		if f, ok := p.staticFilms[cleanTitle]; ok {
+			return &f, true
+		}
+		if f, ok := p.dynamicCache[cleanTitle]; ok {
 			return &f, true
 		}
 	}
@@ -504,14 +536,8 @@ func (p *ArchiveProvider) GetAllFilms() []VerifiedFilm {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	var results []VerifiedFilm
-	seen := make(map[string]bool)
-	for _, f := range p.films {
-		if !seen[f.TMDBID] {
-			seen[f.TMDBID] = true
-			results = append(results, f)
-		}
-	}
+	results := make([]VerifiedFilm, len(p.staticList))
+	copy(results, p.staticList)
 	return results
 }
 
@@ -578,6 +604,8 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 	badKeywords := []string{
 		"trailer", "review", "scene", "sample", "gameplay", "teaser", "youtube-",
 		"vidcast", "acceptance", "vlog", "reaction", "episode", "promo", "mineola", "lego",
+		"walkthrough", "playthrough", "let's play", "longplay", "speedrun", "mod", "cutscenes",
+		"game", "pc gameplay", "ps4", "ps5", "xbox", "nintendo", "boss fight", "ending scene",
 	}
 
 	titleWords := strings.Fields(strings.ToLower(cleanTitle))
@@ -606,6 +634,13 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 			ident := doc.Identifier
 			docTitle := doc.Title
 			combinedText := strings.ToLower(docTitle + " " + ident)
+
+			// Skip foreign dubbed packs if searching English film
+			if strings.Contains(strings.ToLower(docTitle), " [fr]") || strings.Contains(ident, "-fr") ||
+			   strings.Contains(strings.ToLower(docTitle), " [ita]") || strings.Contains(ident, "-ita") ||
+			   strings.Contains(strings.ToLower(docTitle), " [es]") || strings.Contains(ident, "-es") {
+				continue
+			}
 
 			// Skip bad keywords
 			hasBad := false
@@ -680,7 +715,13 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 				film := VerifiedFilm{
 					TMDBID:   cleanID,
 					Title:    rawTitle,
-					Year:     fmt.Sprintf("%v", doc.Year),
+					Year:     func() string {
+					if doc.Year == nil { return "" }
+					s := fmt.Sprintf("%v", doc.Year)
+					if s == "<nil>" || s == "nil" { return "" }
+					if len(s) >= 4 { return s[:4] }
+					return s
+				}(),
 					Duration: "Feature Film",
 					Rating:   "8.0",
 					Overview: fmt.Sprintf("Master Presentation of %s streaming directly from Archive.org", rawTitle),
@@ -697,10 +738,10 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 					AudioTracks: []string{"Stereo Master (Original Audio)"},
 				}
 
-				// Cache in memory
+				// Cache in dynamicCache ONLY (never pollute static verified catalog)
 				p.mu.Lock()
-				p.films[cleanID] = film
-				p.films[strings.ToLower(strings.TrimSpace(rawTitle))] = film
+				p.dynamicCache[cleanID] = film
+				p.dynamicCache[strings.ToLower(strings.TrimSpace(rawTitle))] = film
 				p.mu.Unlock()
 
 				return &film, nil

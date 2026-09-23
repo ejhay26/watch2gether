@@ -351,8 +351,8 @@ class DesktopHUD extends StatelessWidget {
 
                         const Spacer(),
 
-                        // Seasons & Episodes Button (if series/anime)
-                        if (hasEpisodes && onToggleEpisodes != null)
+                        // Seasons & Episodes Button (ONLY when in fullscreen)
+                        if (isFullscreen && hasEpisodes && onToggleEpisodes != null)
                           IconButton(
                             icon: Icon(
                               Icons.video_library_rounded,
@@ -363,13 +363,14 @@ class DesktopHUD extends StatelessWidget {
                             onPressed: onToggleEpisodes,
                           ),
 
-                        // Audio Dub / Track Selector
+                        // Audio Dub / Track Selector (Expands cleanly upward)
                         PopupMenuButton<String>(
                           tooltip: 'Audio Dub / Languages',
                           icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 20),
                           color: AppColors.surfaceElevated,
                           elevation: 8,
                           position: PopupMenuPosition.over,
+                          offset: const Offset(0, -220),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                           constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
@@ -408,13 +409,14 @@ class DesktopHUD extends StatelessWidget {
                           onSelected: onSelectAudioTrack,
                         ),
 
-                        // Subtitle Track Selector
+                        // Subtitle Track Selector (Expands cleanly upward)
                         PopupMenuButton<String>(
                           tooltip: 'Subtitles / Captions',
                           icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 20),
                           color: AppColors.surfaceElevated,
                           elevation: 8,
                           position: PopupMenuPosition.over,
+                          offset: const Offset(0, -220),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                           constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
@@ -453,7 +455,7 @@ class DesktopHUD extends StatelessWidget {
                           onSelected: onSelectSubtitle,
                         ),
 
-                        // Dynamic Quality & Sources Selector
+                        // Dynamic Quality & Sources Selector (Expands cleanly upward)
                         if (streamResult != null && streamResult!.sources.isNotEmpty)
                           PopupMenuButton<StreamSource>(
                             tooltip: 'Dynamic Sources & Quality',
@@ -461,6 +463,7 @@ class DesktopHUD extends StatelessWidget {
                             color: AppColors.surfaceElevated,
                             elevation: 8,
                             position: PopupMenuPosition.over,
+                            offset: const Offset(0, -220),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                             constraints: const BoxConstraints(minWidth: 240, maxWidth: 380),
                             itemBuilder: (ctx) {

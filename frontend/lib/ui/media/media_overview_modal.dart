@@ -73,12 +73,21 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     return type == 'tv' || id.startsWith('anime-');
   }
 
+  bool get _isAnime {
+    final id = widget.item.id;
+    if (id.startsWith('anime-')) return true;
+    final genres = _details?.genres ?? widget.item.genres ?? [];
+    if (genres.any((g) => g.toLowerCase().contains('anime'))) return true;
+    final year = widget.item.year ?? '';
+    return year.toLowerCase().contains('anime');
+  }
+
   Future<void> _playMedia({Episode? episode, bool createRoom = false}) async {
     setState(() => _isLaunchingPlayer = true);
 
     try {
       final epId = episode?.id ?? (_episodes.isNotEmpty ? _episodes[0].id : widget.item.id);
-      final srvs = await _api.getServers(epId);
+      final srvs = await _api.getServers(epId, title: widget.item.title);
       String srvId = epId;
       if (srvs.isNotEmpty) {
         if (_preferDub) {
@@ -301,7 +310,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                                     ),
                                   ),
                                   const SizedBox(width: 10),
-                                ] else if (_isSeries) ...[
+                                ] else if (_isSeries && _isAnime) ...[
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                     decoration: BoxDecoration(

@@ -1,3 +1,7 @@
+# Local Scripts & Commands
+*.ps1
+start_backend.ps1
+
 # Ralph Loop Local Backlog (Strictly Local)
 TODO.md
 TODO*.md
@@ -44,3 +48,6 @@ frontend/macos/Pods/
 *~
 .DS_Store
 Thumbs.db
+
+# User temporary evidence screenshots
+screenshots-evidences/

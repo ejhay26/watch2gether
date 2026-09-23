@@ -1,9 +1,15 @@
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 import '../constants/theme.dart';
 import '../models/media_item.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/playback_service.dart';
 import 'auth/auth_modal.dart';
 import 'auth/profile_dialog.dart';
 import 'media/media_overview_modal.dart';
@@ -19,11 +25,53 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ApiService _api = ApiService();
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _keyboardFocusNode = FocusNode();
 
   List<MediaItem> _items = [];
   bool _isLoading = true;
   String? _error;
   int _selectedFilter = 0; // 0: All / Trending, 1: Anime & Animation, 2: Movies, 3: TV Series
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTrending();
+  }
+
+  @override
+  void dispose() {
+    _searchFocusNode.dispose();
+    _keyboardFocusNode.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      // Keybind: Slash '/' focuses search bar (only on explore page, when not already focused)
+      if (event.logicalKey == LogicalKeyboardKey.slash) {
+        if (!_searchFocusNode.hasFocus) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _searchFocusNode.requestFocus();
+            _searchController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _searchController.text.length),
+            );
+          });
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_searchFocusNode.hasFocus) {
+          _searchFocusNode.unfocus();
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.f11) {
+        if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+          windowManager.isFullScreen().then((isFull) {
+            windowManager.setFullScreen(!isFull);
+          });
+        }
+      }
+    }
+  }
 
   Future<void> _selectFilter(int index) async {
     setState(() {
@@ -63,40 +111,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     }
-  }
-
-  Widget _buildCategoryChip(int index, String label) {
-    final isSelected = _selectedFilter == index;
-    return InkWell(
-      onTap: () => _selectFilter(index),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.accent : AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: isSelected ? AppColors.accent : AppColors.surfaceBorder,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : AppColors.textSecondary,
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadTrending();
   }
 
   Future<void> _loadTrending() async {
@@ -220,191 +234,449 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final auth = Provider.of<AuthService>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.accent,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'WATCHHUB',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
-                  letterSpacing: 1.5,
-                ),
-              ),
+  Widget _buildCategoryChip(int index, String label) {
+    final isSelected = _selectedFilter == index;
+    return InkWell(
+      onTap: () => _selectFilter(index),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accent : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isSelected ? AppColors.accent : AppColors.surfaceBorder,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : AppColors.textSecondary,
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             ),
-            const SizedBox(width: 12),
-            const Text(
-              'STREAMING THEATER',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                letterSpacing: 0.8,
-              ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _restoreFromFloating(PlaybackService playbackService) {
+    final player = playbackService.player;
+    final controller = playbackService.controller;
+    final mediaId = playbackService.mediaId ?? '';
+    final epId = playbackService.episodeId;
+    final title = playbackService.title ?? '';
+    final subtitle = playbackService.subtitle;
+    final streamUrl = playbackService.streamUrl ?? '';
+    final streamResult = playbackService.streamResult;
+
+    playbackService.restore();
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          title: title,
+          subtitle: subtitle,
+          streamUrl: streamUrl,
+          mediaId: mediaId,
+          episodeId: epId,
+          streamResult: streamResult,
+          existingPlayer: player,
+          existingController: controller,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloatingMiniPlayer(PlaybackService playbackService) {
+    if (!playbackService.isFloating || playbackService.controller == null) {
+      return const SizedBox.shrink();
+    }
+
+    final isNarrow = MediaQuery.of(context).size.width < 600;
+    final double playerWidth = isNarrow ? 260.0 : 330.0;
+    final double playerHeight = isNarrow ? 146.0 : 185.0;
+
+    return Positioned(
+      bottom: isNarrow ? 16 : 24,
+      right: isNarrow ? 16 : 24,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        width: playerWidth,
+        height: playerHeight,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.accent.withOpacity(0.6), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.75),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
-        actions: [
-          // Join Room Button
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.accent,
-              side: BorderSide(color: AppColors.accent.withOpacity(0.5)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Video surface - tap anywhere to restore full screen player
+            GestureDetector(
+              onTap: () => _restoreFromFloating(playbackService),
+              child: Video(
+                controller: playbackService.controller!,
+                controls: NoVideoControls,
+              ),
             ),
-            icon: const Icon(Icons.meeting_room_rounded, size: 18),
-            label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-            onPressed: _showJoinRoomDialog,
-          ),
-          const SizedBox(width: 12),
 
-          // User Account Button
-          if (auth.isAuthenticated)
-            InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () => ProfileDialog.show(context),
+            // Top Header overlay (title & action buttons)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.surfaceBorder),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black87, Colors.transparent],
+                  ),
                 ),
                 child: Row(
                   children: [
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundColor: AppColors.accent,
+                    Expanded(
                       child: Text(
-                        (auth.username ?? 'U')[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+                        playbackService.title ?? 'Playing',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      auth.username ?? 'User',
-                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    const SizedBox(width: 4),
+                    // Expand / Restore button
+                    InkWell(
+                      onTap: () => _restoreFromFloating(playbackService),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black38,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Close button
+                    InkWell(
+                      onTap: () => playbackService.stopFloating(),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black38,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
+                      ),
                     ),
                   ],
                 ),
               ),
-            )
-          else
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.surfaceElevated,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              ),
-              icon: const Icon(Icons.person_outline, size: 18),
-              label: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              onPressed: () => AuthModal.show(context),
             ),
 
-          const SizedBox(width: 16),
-        ],
+            // Play/Pause quick button (bottom-right)
+            Positioned(
+              bottom: 8,
+              right: 8,
+              child: StreamBuilder<bool>(
+                stream: playbackService.player?.stream.playing,
+                initialData: playbackService.player?.state.playing ?? true,
+                builder: (context, snapshot) {
+                  final isPlaying = snapshot.data ?? true;
+                  return InkWell(
+                    onTap: () {
+                      playbackService.player?.playOrPause();
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Icon(
+                        isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
-      body: Column(
-        children: [
-          // Search Bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-            child: TextField(
-              controller: _searchController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Search movies, TV series, anime, open cinema...',
-                prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, color: AppColors.textMuted),
-                        onPressed: () {
-                          _searchController.clear();
-                          _loadTrending();
-                        },
-                      )
-                    : null,
-              ),
-              onSubmitted: _performSearch,
-            ),
-          ),
+    );
+  }
 
-          // Category Filters (Trending, Anime, Movies, TV)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
-            child: SizedBox(
-              height: 34,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  _buildCategoryChip(0, 'All'),
-                  const SizedBox(width: 8),
-                  _buildCategoryChip(1, 'Anime & Animation'),
-                  const SizedBox(width: 8),
-                  _buildCategoryChip(2, 'Movies'),
-                  const SizedBox(width: 8),
-                  _buildCategoryChip(3, 'TV Series'),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
+  @override
+  Widget build(BuildContext context) {
+    final auth = Provider.of<AuthService>(context);
+    final playbackService = Provider.of<PlaybackService>(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
 
-          // Content Area
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-                : _error != null
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(_error!, style: const TextStyle(color: AppColors.textSecondary)),
-                            const SizedBox(height: 12),
-                            ElevatedButton(
-                              onPressed: _loadTrending,
-                              child: const Text('Retry'),
-                            ),
-                          ],
+    return KeyboardListener(
+      focusNode: _keyboardFocusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: isMobile ? 12 : 20,
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'WATCHHUB',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              if (!isMobile) ...[
+                const SizedBox(width: 12),
+                const Text(
+                  'STREAMING THEATER',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                    letterSpacing: 2.0,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            // Join Room Button
+            if (isMobile)
+              IconButton(
+                icon: const Icon(Icons.meeting_room_rounded, color: AppColors.accent, size: 20),
+                tooltip: 'Join Room',
+                onPressed: _showJoinRoomDialog,
+              )
+            else
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  side: BorderSide(color: AppColors.accent.withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                ),
+                icon: const Icon(Icons.meeting_room_rounded, size: 18),
+                label: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                onPressed: _showJoinRoomDialog,
+              ),
+
+            const SizedBox(width: 8),
+
+            // User Account Button
+            if (auth.isAuthenticated)
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => ProfileDialog.show(context),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.surfaceBorder),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 12,
+                        backgroundColor: AppColors.accent,
+                        child: Text(
+                          (auth.username ?? 'U')[0].toUpperCase(),
+                          style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
                         ),
-                      )
-                    : _items.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No titles found.',
-                              style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                      if (!isMobile) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          auth.username ?? 'User',
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              )
+            else if (isMobile)
+              IconButton(
+                icon: const Icon(Icons.person_outline, color: Colors.white, size: 20),
+                tooltip: 'Sign In',
+                onPressed: () => AuthModal.show(context),
+              )
+            else
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.surfaceElevated,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                ),
+                icon: const Icon(Icons.person_outline, size: 18),
+                label: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                onPressed: () => AuthModal.show(context),
+              ),
+
+            SizedBox(width: isMobile ? 12 : 16),
+          ],
+        ),
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                // Search Bar with slash shortcut hint
+                Padding(
+                  padding: EdgeInsets.fromLTRB(isMobile ? 12 : 20, 12, isMobile ? 12 : 20, 8),
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: isMobile
+                          ? 'Search titles, movies, series...'
+                          : 'Search movies, TV series, anime (Press / to focus)...',
+                      prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!isMobile && !_searchFocusNode.hasFocus)
+                            Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: const Text(
+                                '/',
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
                             ),
-                          )
-                        : GridView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 220,
-                              childAspectRatio: 0.65,
-                              crossAxisSpacing: 16,
-                              mainAxisSpacing: 16,
+                          if (_searchController.text.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.clear, color: AppColors.textMuted),
+                              onPressed: () {
+                                _searchController.clear();
+                                _loadTrending();
+                              },
                             ),
-                            itemCount: _items.length,
-                            itemBuilder: (context, index) {
-                              final item = _items[index];
-                              return _buildMediaCard(item);
-                            },
-                          ),
-          ),
-        ],
+                        ],
+                      ),
+                    ),
+                    onSubmitted: _performSearch,
+                  ),
+                ),
+
+                // Category Filters (Trending, Anime, Movies, TV)
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 12.0 : 20.0, vertical: 2.0),
+                  child: SizedBox(
+                    height: 34,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        _buildCategoryChip(0, 'All'),
+                        const SizedBox(width: 8),
+                        _buildCategoryChip(1, 'Anime & Animation'),
+                        const SizedBox(width: 8),
+                        _buildCategoryChip(2, 'Movies'),
+                        const SizedBox(width: 8),
+                        _buildCategoryChip(3, 'TV Series'),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Content Area: Grid view with responsive columns
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+                      : _error != null
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(_error!, style: const TextStyle(color: AppColors.textSecondary)),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton(
+                                    onPressed: _loadTrending,
+                                    child: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _items.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No titles found.',
+                                    style: TextStyle(color: AppColors.textSecondary),
+                                  ),
+                                )
+                              : GridView.builder(
+                                  padding: EdgeInsets.fromLTRB(
+                                    isMobile ? 12 : 20,
+                                    10,
+                                    isMobile ? 12 : 20,
+                                    playbackService.isFloating ? 200 : 20,
+                                  ),
+                                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: isMobile ? 180 : 220,
+                                    childAspectRatio: 0.65,
+                                    crossAxisSpacing: isMobile ? 10 : 16,
+                                    mainAxisSpacing: isMobile ? 10 : 16,
+                                  ),
+                                  itemCount: _items.length,
+                                  itemBuilder: (context, index) {
+                                    final item = _items[index];
+                                    return _buildMediaCard(item);
+                                  },
+                                ),
+                ),
+              ],
+            ),
+
+            // Floating Mini-Player (PiP on Explore screen)
+            _buildFloatingMiniPlayer(playbackService),
+          ],
+        ),
       ),
     );
   }
@@ -498,7 +770,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
                           const SizedBox(width: 3),
                           Text(
-                            '$ratingSrc $rating',
+                            ' ',
                             style: const TextStyle(
                               color: Colors.amber,
                               fontSize: 10,

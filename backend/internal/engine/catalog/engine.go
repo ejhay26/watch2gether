@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -175,19 +176,28 @@ func (c *CatalogEngine) Search(ctx context.Context, query string) ([]model.Media
 	var items []model.MediaItem
 	seen := make(map[string]bool)
 
-	cleanQ := strings.ToLower(strings.TrimSpace(query))
-	// 1. Search verified archive films
+	cleanQ := strings.TrimSpace(query)
+	lowerQ := strings.ToLower(cleanQ)
+
+	// 1. Search verified archive films (only valid entries with poster)
 	for _, vf := range c.archiveProvider.GetAllFilms() {
-		if strings.Contains(strings.ToLower(vf.Title), cleanQ) {
+		if vf.Poster == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(vf.Title), lowerQ) {
 			id := fmt.Sprintf("tmdb-movie-%s", vf.TMDBID)
 			seen[id] = true
+			yr := vf.Year
+			if yr == "<nil>" || yr == "nil" {
+				yr = ""
+			}
 			items = append(items, model.MediaItem{
 				ID:           id,
 				Title:        vf.Title,
 				Type:         model.MediaTypeMovie,
 				Poster:       vf.Poster,
 				Banner:       vf.Banner,
-				Year:         vf.Year,
+				Year:         yr,
 				Rating:       vf.Rating,
 				RatingSource: "TMDB",
 				Quality:      "1080p HD",
@@ -197,81 +207,184 @@ func (c *CatalogEngine) Search(ctx context.Context, query string) ([]model.Media
 		}
 	}
 
-	// 2. Search TMDB
-	endpoint := fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-	if err == nil {
+	// 2. Parse year queries like "Camp 2025" or "Rush Hour 1998"
+	reYear := regexp.MustCompile(`^(.*?)\s+(19\d\d|20\d\d)$`)
+	yearMatches := reYear.FindStringSubmatch(cleanQ)
+	var searchTitle string
+	var searchYear string
+	if len(yearMatches) == 3 {
+		searchTitle = strings.TrimSpace(yearMatches[1])
+		searchYear = strings.TrimSpace(yearMatches[2])
+	}
+
+	var endpoints []string
+	if searchYear != "" {
+		endpoints = append(endpoints,
+			fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&primary_release_year=%s", c.baseURL, c.getKey(), url.QueryEscape(searchTitle), searchYear),
+			fmt.Sprintf("%s/search/tv?api_key=%s&query=%s&first_air_date_year=%s", c.baseURL, c.getKey(), url.QueryEscape(searchTitle), searchYear),
+			fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(cleanQ)),
+			fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(searchTitle)),
+		)
+	} else {
+		endpoints = append(endpoints,
+			fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(cleanQ)),
+		)
+	}
+
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		if err != nil {
+			continue
+		}
 		resp, err := c.client.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			defer resp.Body.Close()
-			var res tmdbListResponse
-			if err := json.NewDecoder(resp.Body).Decode(&res); err == nil {
-				for _, item := range res.Results {
-					if item.MediaType != "" && item.MediaType != "movie" && item.MediaType != "tv" {
-						continue
-					}
-					title := item.Title
-					if title == "" {
-						title = item.Name
-					}
-					if title == "" {
-						continue
-					}
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
 
-					mType := model.MediaTypeMovie
-					if item.MediaType == "tv" {
-						mType = model.MediaTypeTV
-					}
+		var res tmdbListResponse
+		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil {
+			for _, item := range res.Results {
+				if item.MediaType != "" && item.MediaType != "movie" && item.MediaType != "tv" {
+					continue
+				}
+				title := item.Title
+				if title == "" {
+					title = item.Name
+				}
+				if title == "" {
+					continue
+				}
 
-					id := fmt.Sprintf("tmdb-%s-%d", mType, item.ID)
-					if seen[id] {
-						continue
-					}
-					seen[id] = true
+				mType := model.MediaTypeMovie
+				if item.MediaType == "tv" {
+					mType = model.MediaTypeTV
+				}
 
-					poster := ""
-					if item.PosterPath != "" {
-						poster = c.imageBase + item.PosterPath
-					} else {
-						poster = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80"
-					}
+				id := fmt.Sprintf("tmdb-%s-%d", mType, item.ID)
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
 
-					banner := poster
-					if item.BackdropPath != "" {
-						banner = c.imageBase + item.BackdropPath
-					}
+				poster := ""
+				if item.PosterPath != "" {
+					poster = c.imageBase + item.PosterPath
+				} else {
+					poster = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80"
+				}
 
-					year := item.ReleaseDate
-					if year == "" {
-						year = item.FirstAirDate
-					}
-					if len(year) >= 4 {
-						year = year[:4]
-					}
+				banner := poster
+				if item.BackdropPath != "" {
+					banner = c.imageBase + item.BackdropPath
+				}
 
-					rating := "7.5"
-					if item.VoteAverage > 0 {
-						rating = fmt.Sprintf("%.1f", item.VoteAverage)
-					}
+				year := item.ReleaseDate
+				if year == "" {
+					year = item.FirstAirDate
+				}
+				if len(year) >= 4 {
+					year = year[:4]
+				}
 
-					items = append(items, model.MediaItem{
-						ID:           id,
-						Title:        title,
-						Type:         mType,
-						Poster:       poster,
-						Banner:       banner,
-						Year:         year,
-						Rating:       rating,
-						RatingSource: "TMDB",
-						Quality:      "1080p HD",
-						Overview:     item.Overview,
-					})
+				rating := "7.5"
+				if item.VoteAverage > 0 {
+					rating = fmt.Sprintf("%.1f", item.VoteAverage)
+				}
+
+				items = append(items, model.MediaItem{
+					ID:           id,
+					Title:        title,
+					Type:         mType,
+					Poster:       poster,
+					Banner:       banner,
+					Year:         year,
+					Rating:       rating,
+					RatingSource: "TMDB",
+					Quality:      "1080p HD",
+					Overview:     item.Overview,
+				})
+			}
+		}
+		resp.Body.Close()
+	}
+
+	return items, nil
+}
+
+// GetRecommendations fetches contextual recommendations based on the currently watched media
+func (c *CatalogEngine) GetRecommendations(ctx context.Context, id string) ([]model.MediaItem, error) {
+	parts := strings.Split(id, "-")
+	if len(parts) >= 3 && parts[0] == "tmdb" {
+		mType := parts[1] // "movie" or "tv"
+		tmdbID := parts[2]
+		endpoint := fmt.Sprintf("%s/%s/%s/recommendations?api_key=%s", c.baseURL, mType, tmdbID, c.getKey())
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		if err == nil {
+			resp, err := c.client.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				var res tmdbListResponse
+				if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Results) > 0 {
+					var items []model.MediaItem
+					for _, item := range res.Results {
+						title := item.Title
+						if title == "" {
+							title = item.Name
+						}
+						if title == "" {
+							continue
+						}
+
+						mTypeItem := model.MediaTypeMovie
+						if item.MediaType == "tv" || mType == "tv" {
+							mTypeItem = model.MediaTypeTV
+						}
+
+						poster := ""
+						if item.PosterPath != "" {
+							poster = c.imageBase + item.PosterPath
+						}
+						banner := poster
+						if item.BackdropPath != "" {
+							banner = c.imageBase + item.BackdropPath
+						}
+
+						year := item.ReleaseDate
+						if year == "" {
+							year = item.FirstAirDate
+						}
+						if len(year) >= 4 {
+							year = year[:4]
+						}
+
+						rating := "7.5"
+						if item.VoteAverage > 0 {
+							rating = fmt.Sprintf("%.1f", item.VoteAverage)
+						}
+
+						items = append(items, model.MediaItem{
+							ID:           fmt.Sprintf("tmdb-%s-%d", mTypeItem, item.ID),
+							Title:        title,
+							Type:         mTypeItem,
+							Poster:       poster,
+							Banner:       banner,
+							Year:         year,
+							Rating:       rating,
+							RatingSource: "TMDB",
+							Quality:      "1080p HD",
+							Overview:     item.Overview,
+						})
+					}
+					if len(items) > 0 {
+						return items, nil
+					}
 				}
 			}
 		}
 	}
 
-	return items, nil
+	// Fallback to trending
+	return c.GetTrending(ctx)
 }
 
 func (c *CatalogEngine) GetDetails(ctx context.Context, id string) (*model.MediaDetails, error) {

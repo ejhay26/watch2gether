@@ -114,6 +114,18 @@ class ApiService {
     }
   }
 
+  Future<List<MediaItem>> getRecommendations(String id) async {
+    try {
+      final res = await _dio.get('/api/v1/recommendations', queryParameters: {'id': id});
+      final items = (res.data['items'] as List<dynamic>?) ?? [];
+      final list = items.map((e) => MediaItem.fromJson(e)).toList();
+      if (list.isNotEmpty) return list;
+      return getTrending();
+    } catch (e) {
+      return getTrending();
+    }
+  }
+
   Future<List<MediaItem>> search(String query) async {
     try {
       final res = await _dio.get('/api/v1/search', queryParameters: {'q': query});
