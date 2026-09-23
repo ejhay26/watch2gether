@@ -2,8 +2,15 @@ package video
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ejhay26/watch2gether/backend/internal/model"
 )
@@ -23,12 +30,17 @@ type VerifiedFilm struct {
 }
 
 type ArchiveProvider struct {
-	films map[string]VerifiedFilm
+	mu     sync.RWMutex
+	films  map[string]VerifiedFilm
+	client *http.Client
 }
 
 func NewArchiveProvider() *ArchiveProvider {
 	p := &ArchiveProvider{
 		films: make(map[string]VerifiedFilm),
+		client: &http.Client{
+			Timeout: 8 * time.Second,
+		},
 	}
 	p.initRegistry()
 	return p
@@ -465,6 +477,9 @@ func (p *ArchiveProvider) initRegistry() {
 }
 
 func (p *ArchiveProvider) Match(mediaID string, title string) (*VerifiedFilm, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	cleanID := mediaID
 	parts := strings.Split(mediaID, "-")
 	if len(parts) >= 3 {
@@ -476,14 +491,19 @@ func (p *ArchiveProvider) Match(mediaID string, title string) (*VerifiedFilm, bo
 	}
 
 	cleanTitle := strings.ToLower(strings.TrimSpace(title))
-	if f, ok := p.films[cleanTitle]; ok {
-		return &f, true
+	if cleanTitle != "" {
+		if f, ok := p.films[cleanTitle]; ok {
+			return &f, true
+		}
 	}
 
 	return nil, false
 }
 
 func (p *ArchiveProvider) GetAllFilms() []VerifiedFilm {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	var results []VerifiedFilm
 	seen := make(map[string]bool)
 	for _, f := range p.films {
@@ -495,10 +515,210 @@ func (p *ArchiveProvider) GetAllFilms() []VerifiedFilm {
 	return results
 }
 
+type archiveSearchResponse struct {
+	Response struct {
+		Docs []struct {
+			Identifier string      `json:"identifier"`
+			Title      string      `json:"title"`
+			Year       interface{} `json:"year"`
+		} `json:"docs"`
+	} `json:"response"`
+}
+
+type archiveFilesResponse struct {
+	Result []struct {
+		Name   string      `json:"name"`
+		Size   interface{} `json:"size"`
+		Format string      `json:"format"`
+	} `json:"result"`
+}
+
+func parseArchiveSize(v interface{}) int64 {
+	switch val := v.(type) {
+	case float64:
+		return int64(val)
+	case int64:
+		return val
+	case int:
+		return int64(val)
+	case string:
+		n, _ := strconv.ParseInt(val, 10, 64)
+		return n
+	default:
+		return 0
+	}
+}
+
+// SearchDynamicArchive searches Archive.org dynamically for full feature film presentations (> 250MB)
+func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID string, title string, year string) (*VerifiedFilm, error) {
+	if film, found := p.Match(mediaID, title); found {
+		return film, nil
+	}
+
+	rawTitle := strings.TrimSpace(title)
+	if rawTitle == "" {
+		return nil, fmt.Errorf("empty title provided")
+	}
+
+	// Sanitize title
+	reg := regexp.MustCompile(`[^a-zA-Z0-9\s]+`)
+	cleanTitle := strings.TrimSpace(reg.ReplaceAllString(rawTitle, ""))
+	if cleanTitle == "" {
+		cleanTitle = rawTitle
+	}
+
+	var queries []string
+	if year != "" && len(year) == 4 {
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND year:%s AND mediatype:movies`, cleanTitle, year))
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies`, cleanTitle))
+	} else {
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies`, cleanTitle))
+	}
+
+	badKeywords := []string{
+		"trailer", "review", "scene", "sample", "gameplay", "teaser", "youtube-",
+		"vidcast", "acceptance", "vlog", "reaction", "episode", "promo", "mineola", "lego",
+	}
+
+	titleWords := strings.Fields(strings.ToLower(cleanTitle))
+
+	for _, q := range queries {
+		searchURL := fmt.Sprintf("https://archive.org/advancedsearch.php?q=%s&fl[]=identifier,title,year,downloads&sort[]=downloads+desc&rows=15&output=json", url.QueryEscape(q))
+		req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+		resp, err := p.client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		var searchRes archiveSearchResponse
+		err = json.NewDecoder(resp.Body).Decode(&searchRes)
+		resp.Body.Close()
+		if err != nil || len(searchRes.Response.Docs) == 0 {
+			continue
+		}
+
+		for _, doc := range searchRes.Response.Docs {
+			ident := doc.Identifier
+			docTitle := doc.Title
+			combinedText := strings.ToLower(docTitle + " " + ident)
+
+			// Skip bad keywords
+			hasBad := false
+			for _, bk := range badKeywords {
+				if strings.Contains(combinedText, bk) {
+					hasBad = true
+					break
+				}
+			}
+			if hasBad {
+				continue
+			}
+
+			// Verify title words exist
+			allWordsMatch := true
+			for _, w := range titleWords {
+				if len(w) > 2 && !strings.Contains(combinedText, w) {
+					allWordsMatch = false
+					break
+				}
+			}
+			if !allWordsMatch {
+				continue
+			}
+
+			// Query files metadata
+			filesURL := fmt.Sprintf("https://archive.org/metadata/%s/files", ident)
+			reqFiles, err := http.NewRequestWithContext(ctx, "GET", filesURL, nil)
+			if err != nil {
+				continue
+			}
+			reqFiles.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
+			respFiles, err := p.client.Do(reqFiles)
+			if err != nil || respFiles.StatusCode != http.StatusOK {
+				continue
+			}
+
+			var filesRes archiveFilesResponse
+			err = json.NewDecoder(respFiles.Body).Decode(&filesRes)
+			respFiles.Body.Close()
+			if err != nil || len(filesRes.Result) == 0 {
+				continue
+			}
+
+			// Find candidate video file > 250MB
+			var bestFile string
+			var bestSize int64
+			for _, f := range filesRes.Result {
+				fNameLower := strings.ToLower(f.Name)
+				if strings.HasSuffix(fNameLower, ".mp4") || strings.HasSuffix(fNameLower, ".mkv") {
+					sz := parseArchiveSize(f.Size)
+					if sz > 250*1024*1024 && sz > bestSize {
+						bestSize = sz
+						bestFile = f.Name
+					}
+				}
+			}
+
+			if bestFile != "" {
+				// Construct direct playable URL
+				// URL encode filename properly
+				encodedFileName := url.PathEscape(bestFile)
+				streamURL := fmt.Sprintf("https://archive.org/download/%s/%s", ident, encodedFileName)
+
+				cleanID := mediaID
+				parts := strings.Split(mediaID, "-")
+				if len(parts) >= 3 {
+					cleanID = parts[2]
+				}
+
+				film := VerifiedFilm{
+					TMDBID:   cleanID,
+					Title:    rawTitle,
+					Year:     fmt.Sprintf("%v", doc.Year),
+					Duration: "Feature Film",
+					Rating:   "8.0",
+					Overview: fmt.Sprintf("Master Presentation of %s streaming directly from Archive.org", rawTitle),
+					Sources: []model.Source{
+						{
+							URL:     streamURL,
+							Quality: "1080p Master Stream (Archive HD)",
+							IsM3U8:  false,
+						},
+					},
+					Subtitles: []model.Subtitle{
+						{URL: "", Lang: "English (Embedded)"},
+					},
+					AudioTracks: []string{"Stereo Master (Original Audio)"},
+				}
+
+				// Cache in memory
+				p.mu.Lock()
+				p.films[cleanID] = film
+				p.films[strings.ToLower(strings.TrimSpace(rawTitle))] = film
+				p.mu.Unlock()
+
+				return &film, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no feature presentation found for %s", rawTitle)
+}
+
 func (p *ArchiveProvider) ResolveStream(ctx context.Context, mediaID string, title string) (*model.StreamResult, error) {
 	film, found := p.Match(mediaID, title)
 	if !found {
-		return nil, fmt.Errorf("film not found in archive registry")
+		var err error
+		film, err = p.SearchDynamicArchive(ctx, mediaID, title, "")
+		if err != nil || film == nil {
+			return nil, fmt.Errorf("film not found in archive registry: %w", err)
+		}
 	}
 
 	return &model.StreamResult{

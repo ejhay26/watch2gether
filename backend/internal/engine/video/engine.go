@@ -87,12 +87,10 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		mediaID = strings.Split(mediaID, "-s")[0]
 	}
 
-	// 1. Try archive provider (16+ verified real films)
+	// 1. Try pre-indexed archive films
 	if film, found := e.archiveProvider.Match(mediaID, title); found {
-		// Filter or prioritize source based on server selection if applicable
 		sources := film.Sources
 		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
-			// User picked server 2: place server 2 at the front of sources
 			sources = []model.Source{sources[1], sources[0]}
 		}
 		return &model.StreamResult{
@@ -101,23 +99,27 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		}, nil
 	}
 
-	// 2. Try TMDB feature provider (official trailers/feature presentations for modern films)
+	// 2. Try dynamic search on Archive.org (matches full 1080p/720p feature presentations > 250MB)
+	if title != "" {
+		film, err := e.archiveProvider.SearchDynamicArchive(ctx, mediaID, title, "")
+		if err == nil && film != nil && len(film.Sources) > 0 {
+			sources := film.Sources
+			if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
+				sources = []model.Source{sources[1], sources[0]}
+			}
+			return &model.StreamResult{
+				Sources:   sources,
+				Subtitles: film.Subtitles,
+			}, nil
+		}
+	}
+
+	// 3. Try TMDB feature provider (official trailers/feature previews for modern films)
 	res, err := e.featureProvider.ResolveFeatureStream(ctx, mediaID, title)
 	if err == nil && res != nil && len(res.Sources) > 0 {
 		return res, nil
 	}
 
-	// 3. Fallback to Big Buck Bunny with title quality label
-	return &model.StreamResult{
-		Sources: []model.Source{
-			{
-				URL:     "https://www.w3schools.com/html/mov_bbb.mp4",
-				Quality: fmt.Sprintf("%s Presentation (1080p)", title),
-				IsM3U8:  false,
-			},
-		},
-		Subtitles: []model.Subtitle{
-			{URL: "", Lang: "English"},
-		},
-	}, nil
+	// 4. Return clean error - zero fake fallback videos
+	return nil, fmt.Errorf("no verified video stream found for %q across any provider", title)
 }

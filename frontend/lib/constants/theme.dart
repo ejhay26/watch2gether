@@ -2,20 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  // Obsidian / Industrial Dark Palette
-  static const Color background = Color(0xFF090A0F);
-  static const Color surface = Color(0xFF13151D);
-  static const Color surfaceElevated = Color(0xFF1C1F2B);
-  static const Color surfaceBorder = Color(0xFF282C3D);
+  // Abyssal Obsidian & Sapphire Palette
+  static const Color background = Color(0xFF090B10);
+  static const Color surface = Color(0xFF0F131C);
+  static const Color surfaceElevated = Color(0xFF161B26);
+  static const Color surfaceBorder = Color(0xFF232B3C);
 
-  static const Color accent = Color(0xFF00E5FF); // Electric Cyan
-  static const Color accentDim = Color(0xFF00B4D8);
-  static const Color accentGlow = Color(0x3300E5FF);
+  static const Color accent = Color(0xFF6366F1); // Electric Indigo / Sapphire
+  static const Color accentBright = Color(0xFF818CF8);
+  static const Color accentDim = Color(0xFF4F46E5);
+  static const Color accentGlow = Color(0x336366F1);
 
-  static const Color textPrimary = Color(0xFFF0F3F6);
-  static const Color textSecondary = Color(0xFF8E95A5);
-  static const Color textMuted = Color(0xFF555C6E);
+  static const Color textPrimary = Color(0xFFF8FAFC);
+  static const Color textSecondary = Color(0xFF94A3B8);
+  static const Color textMuted = Color(0xFF64748B);
 
+  static const Color ratingAmber = Color(0xFFF59E0B);
   static const Color liveIndicator = Color(0xFF10B981);
   static const Color warning = Color(0xFFF59E0B);
   static const Color danger = Color(0xFFEF4444);

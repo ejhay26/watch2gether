@@ -56,6 +56,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String _currentAudioTrack = 'Default';
   String _currentSubtitleTrack = 'Off';
   List<String> _availableAudioTracks = [];
+  List<Server> _availableServers = [];
   List<String> _availableSubtitles = ['Off'];
   StreamResult? _currentStreamResult;
 
@@ -79,11 +80,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final FocusNode _keyboardFocusNode = FocusNode();
 
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-  bool get _isSeries =>
-      widget.mediaId.startsWith('anime-') ||
-      widget.mediaId.contains('tv') ||
-      widget.episodeId != null ||
-      _episodes.isNotEmpty;
+  bool get _isSeries {
+    if (widget.mediaId.contains('movie')) return false;
+    return widget.mediaId.startsWith('anime-') || widget.mediaId.contains('tv');
+  }
 
   @override
   void initState() {
@@ -106,52 +106,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _player.stream.tracks.listen((tracks) {
       if (mounted) {
-        final audioList = <String>[];
-        for (int i = 0; i < tracks.audio.length; i++) {
-          final a = tracks.audio[i];
-          String lang = a.language ?? '';
-          String title = a.title ?? '';
-          if (title.isNotEmpty && title.toLowerCase() != 'track') {
-            audioList.add('Track ${i + 1}: $title');
-            continue;
-          }
-          String displayLang = lang.isNotEmpty ? lang.toUpperCase() : 'Audio';
-          if (lang.toLowerCase() == 'en' || lang.toLowerCase() == 'eng') {
-            displayLang = 'English';
-          } else if (lang.toLowerCase() == 'es' || lang.toLowerCase() == 'spa') {
-            displayLang = 'Spanish';
-          } else if (lang.toLowerCase() == 'fr' || lang.toLowerCase() == 'fra') {
-            displayLang = 'French';
-          } else if (lang.toLowerCase() == 'de' || lang.toLowerCase() == 'deu') {
-            displayLang = 'German';
-          } else if (lang.toLowerCase() == 'ja' || lang.toLowerCase() == 'jpn') {
-            displayLang = 'Japanese';
-          }
-
-          String ch = (a.channels != null && a.channels!.toString().isNotEmpty)
-              ? ' [${a.channels}]'
-              : '';
-          audioList.add('Track ${i + 1}: $displayLang$ch');
-        }
-
-        final subList = <String>['Off'];
-        for (int i = 0; i < tracks.subtitle.length; i++) {
-          final s = tracks.subtitle[i];
-          final lang = s.language ?? s.title ?? 'Subtitle ${i + 1}';
-          subList.add(lang);
-        }
-        if (_currentStreamResult != null) {
-          for (final extSub in _currentStreamResult!.subtitles) {
-            if (extSub.lang.isNotEmpty && !subList.contains(extSub.lang)) {
-              subList.add(extSub.lang);
-            }
-          }
-        }
-
-        setState(() {
-          _availableAudioTracks = audioList;
-          _availableSubtitles = subList;
-        });
+        _refreshAudioTracks();
       }
     });
 
@@ -166,10 +121,86 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _startHistorySaving();
     _loadSeriesData();
     _loadRecommended();
+    _loadAvailableServers();
   }
 
   void _openMedia(String url, {Map<String, String>? headers}) {
     _player.open(Media(url, httpHeaders: headers));
+  }
+
+  Future<void> _loadAvailableServers() async {
+    try {
+      final epId = _currentEpisodeId ?? widget.episodeId ?? widget.mediaId;
+      final srvs = await ApiService().getServers(epId, title: _currentTitle);
+      if (mounted) {
+        setState(() => _availableServers = srvs);
+        _refreshAudioTracks();
+      }
+    } catch (_) {}
+  }
+
+  void _refreshAudioTracks() {
+    final audioList = <String>[];
+
+    // External Dub / Sub stream servers (for anime / series)
+    for (final s in _availableServers) {
+      if (s.name.toUpperCase().contains('[DUB]')) {
+        audioList.add('[DUB] English Dub');
+      } else if (s.name.toUpperCase().contains('[SUB]')) {
+        audioList.add('[SUB] Japanese Audio');
+      }
+    }
+
+    // Native player audio streams
+    final tracks = _player.state.tracks.audio;
+    for (int i = 0; i < tracks.length; i++) {
+      final a = tracks[i];
+      String lang = a.language ?? '';
+      String title = a.title ?? '';
+      if (title.isNotEmpty && title.toLowerCase() != 'track') {
+        audioList.add('Track ${i + 1}: $title');
+        continue;
+      }
+      String displayLang = 'English (Stereo)';
+      if (lang.toLowerCase() == 'en' || lang.toLowerCase() == 'eng') {
+        displayLang = 'English';
+      } else if (lang.toLowerCase() == 'ja' || lang.toLowerCase() == 'jpn') {
+        displayLang = 'Japanese';
+      } else if (lang.toLowerCase() == 'es' || lang.toLowerCase() == 'spa') {
+        displayLang = 'Spanish';
+      } else if (lang.toLowerCase() == 'fr' || lang.toLowerCase() == 'fra') {
+        displayLang = 'French';
+      } else if (lang.toLowerCase() == 'de' || lang.toLowerCase() == 'deu') {
+        displayLang = 'German';
+      }
+      audioList.add('Track ${i + 1}: $displayLang');
+    }
+
+    if (audioList.isEmpty) {
+      audioList.add('Default');
+    }
+
+    final subList = <String>['Off'];
+    for (int i = 0; i < _player.state.tracks.subtitle.length; i++) {
+      final s = _player.state.tracks.subtitle[i];
+      final lang = s.language ?? s.title ?? 'Subtitle ${i + 1}';
+      subList.add(lang);
+    }
+    if (_currentStreamResult != null) {
+      for (final extSub in _currentStreamResult!.subtitles) {
+        if (extSub.lang.isNotEmpty && !subList.contains(extSub.lang)) {
+          subList.add(extSub.lang);
+        }
+      }
+    }
+
+    setState(() {
+      _availableAudioTracks = audioList;
+      _availableSubtitles = subList;
+      if (_currentAudioTrack == 'Default' && audioList.isNotEmpty) {
+        _currentAudioTrack = audioList.first;
+      }
+    });
   }
 
   Future<void> _loadSeriesData() async {
@@ -235,6 +266,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
         _openMedia(src.url, headers: streamRes.headers);
         _player.play();
+        _loadAvailableServers();
       }
     } catch (e) {
       if (mounted) {
@@ -274,6 +306,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } else {
         _player.seek(Duration(milliseconds: (position * 1000).toInt()));
         _player.play();
+        _loadAvailableServers();
       }
     };
 
@@ -300,8 +333,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _switchAudioTrack(String trackLabel) {
+  Future<void> _switchAudioTrack(String trackLabel) async {
     setState(() => _currentAudioTrack = trackLabel);
+
+    // If switching between [DUB] and [SUB] streaming servers
+    if (trackLabel.toUpperCase().contains('[DUB]') || trackLabel.toUpperCase().contains('[SUB]')) {
+      final isDub = trackLabel.toUpperCase().contains('[DUB]');
+      Server? targetSrv;
+      for (final s in _availableServers) {
+        if (isDub && s.name.toUpperCase().contains('[DUB]')) {
+          targetSrv = s;
+          break;
+        } else if (!isDub && s.name.toUpperCase().contains('[SUB]')) {
+          targetSrv = s;
+          break;
+        }
+      }
+      if (targetSrv != null) {
+        final currentPos = _player.state.position;
+        final res = await ApiService().getSources(targetSrv.id, title: _currentTitle);
+        if (res != null && res.sources.isNotEmpty) {
+          setState(() {
+            _currentStreamUrl = res.sources.first.url;
+            _currentStreamResult = res;
+          });
+          _openMedia(res.sources.first.url, headers: res.headers);
+          await _player.seek(currentPos);
+          _player.play();
+          return;
+        }
+      }
+    }
+
     final tracks = _player.state.tracks.audio;
     for (int i = 0; i < _availableAudioTracks.length; i++) {
       if (_availableAudioTracks[i] == trackLabel && i < tracks.length) {
@@ -731,43 +794,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
       children: [
         _buildVideoPlayerWithHUD(roomService, isRoomActive),
 
-        // Sliding Room Chat Drawer
+        // Sliding Room Chat Drawer with Click Isolation
         Positioned(
           top: 0,
           right: 0,
           bottom: 0,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeInOut,
-            width: isRoomActive && _isChatOpen ? 340 : 0,
-            child: OverflowBox(
-              minWidth: 340,
-              maxWidth: 340,
-              alignment: Alignment.topRight,
-              child: isRoomActive
-                  ? RoomChatDrawer(
-                      roomService: roomService,
-                      onClose: () => setState(() => _isChatOpen = false),
-                    )
-                  : const SizedBox.shrink(),
+          child: IgnorePointer(
+            ignoring: !(isRoomActive && _isChatOpen),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOut,
+              width: isRoomActive && _isChatOpen ? 340 : 0,
+              child: OverflowBox(
+                minWidth: 340,
+                maxWidth: 340,
+                alignment: Alignment.topRight,
+                child: (isRoomActive && _isChatOpen)
+                    ? RoomChatDrawer(
+                        roomService: roomService,
+                        onClose: () => setState(() => _isChatOpen = false),
+                      )
+                    : const SizedBox.shrink(),
+              ),
             ),
           ),
         ),
 
-        // Sliding Episodes Drawer
+        // Sliding Episodes Drawer with Click Isolation
         Positioned(
           top: 0,
           right: 0,
           bottom: 0,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeInOut,
-            width: _isEpisodesOpen ? 340 : 0,
-            child: OverflowBox(
-              minWidth: 340,
-              maxWidth: 340,
-              alignment: Alignment.topRight,
-              child: _buildEpisodesDrawer(),
+          child: IgnorePointer(
+            ignoring: !_isEpisodesOpen,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOut,
+              width: _isEpisodesOpen ? 340 : 0,
+              child: OverflowBox(
+                minWidth: 340,
+                maxWidth: 340,
+                alignment: Alignment.topRight,
+                child: _isEpisodesOpen ? _buildEpisodesDrawer() : const SizedBox.shrink(),
+              ),
             ),
           ),
         ),
@@ -864,41 +933,106 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ],
                       ),
 
-                      // Quick Season/Episodes Pills
-                      if (_isSeries && _episodes.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Episodes',
-                          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 38,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _episodes.length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 8),
-                            itemBuilder: (context, i) {
-                              final ep = _episodes[i];
-                              final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && i == 0);
-                              return ActionChip(
-                                label: Text(
-                                  'EP ${ep.number}',
-                                  style: TextStyle(
-                                    color: isPlaying ? Colors.black : Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
+                      // Seasons & Responsive Episode Grid (Below Minimized Player)
+                      if (_isSeries) ...[
+                        const SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Seasons & Episodes',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (_availableSeasons.length > 1)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceElevated,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppColors.surfaceBorder),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<int>(
+                                    value: _selectedSeason,
+                                    dropdownColor: AppColors.surfaceElevated,
+                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                    icon: const Icon(Icons.arrow_drop_down, color: AppColors.accent, size: 20),
+                                    items: _availableSeasons.map((s) => DropdownMenuItem(value: s, child: Text('Season $s'))).toList(),
+                                    onChanged: (val) {
+                                      if (val != null) {
+                                        setState(() => _selectedSeason = val);
+                                        _loadSeriesData();
+                                      }
+                                    },
                                   ),
                                 ),
-                                backgroundColor: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
-                                side: BorderSide(
-                                  color: isPlaying ? AppColors.accent : AppColors.surfaceBorder,
-                                ),
-                                onPressed: () => _selectEpisode(ep),
-                              );
-                            },
-                          ),
+                              ),
+                          ],
                         ),
+                        const SizedBox(height: 12),
+                        _loadingEpisodes
+                            ? const Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: Center(child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2)),
+                              )
+                            : _episodes.isEmpty
+                                ? const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 8),
+                                    child: Text('No episodes found.', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                                  )
+                                : Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: _episodes.map((ep) {
+                                      final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && ep == _episodes.first);
+                                      return Tooltip(
+                                        message: ep.title.isNotEmpty ? ep.title : 'Episode ${ep.number}',
+                                        child: InkWell(
+                                          onTap: () => _selectEpisode(ep),
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Container(
+                                            width: 58,
+                                            height: 46,
+                                            decoration: BoxDecoration(
+                                              color: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: isPlaying ? AppColors.accentBright : AppColors.surfaceBorder,
+                                                width: isPlaying ? 1.5 : 1.0,
+                                              ),
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  '${ep.number}',
+                                                  style: TextStyle(
+                                                    color: isPlaying ? Colors.white : AppColors.textPrimary,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                  ),
+                                                ),
+                                                if (isPlaying)
+                                                  Container(
+                                                    margin: const EdgeInsets.only(top: 2),
+                                                    width: 14,
+                                                    height: 2,
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white,
+                                                      borderRadius: BorderRadius.circular(1),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
                       ],
                     ],
                   ),
@@ -917,7 +1051,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           child: Column(
             children: [
-              // Tab Header
+              // Sidebar Header (Up Next / Recommended Films)
               Container(
                 decoration: const BoxDecoration(
                   color: AppColors.surfaceElevated,
@@ -925,33 +1059,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
                 child: Row(
                   children: [
-                    if (_isSeries)
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => setState(() => _selectedRightTab = 0),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: _selectedRightTab == 0 ? AppColors.accent : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                'Episodes',
-                                style: TextStyle(
-                                  color: _selectedRightTab == 0 ? AppColors.accent : Colors.white70,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
                     Expanded(
                       child: InkWell(
                         onTap: () => setState(() => _selectedRightTab = 1),
@@ -960,7 +1067,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           decoration: BoxDecoration(
                             border: Border(
                               bottom: BorderSide(
-                                color: _selectedRightTab == 1 ? AppColors.accent : Colors.transparent,
+                                color: _selectedRightTab != 2 ? AppColors.accent : Colors.transparent,
                                 width: 2,
                               ),
                             ),
@@ -969,7 +1076,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             child: Text(
                               'Up Next',
                               style: TextStyle(
-                                color: _selectedRightTab == 1 ? AppColors.accent : Colors.white70,
+                                color: _selectedRightTab != 2 ? AppColors.accent : Colors.white70,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1009,20 +1116,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
 
-              // Tab Body
+              // Sidebar Body
               Expanded(
-                child: _selectedRightTab == 0 && _isSeries
-                    ? _buildEpisodesDrawer()
-                    : _selectedRightTab == 2 && isRoomActive
-                        ? RoomChatDrawer(
-                            roomService: roomService,
-                            onClose: () => setState(() => _selectedRightTab = 1),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemCount: _recommended.length,
-                            itemBuilder: (context, i) => _buildRecommendedItemCard(_recommended[i]),
-                          ),
+                child: _selectedRightTab == 2 && isRoomActive
+                    ? RoomChatDrawer(
+                        roomService: roomService,
+                        onClose: () => setState(() => _selectedRightTab = 1),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: _recommended.length,
+                        itemBuilder: (context, i) => _buildRecommendedItemCard(_recommended[i]),
+                      ),
               ),
             ],
           ),

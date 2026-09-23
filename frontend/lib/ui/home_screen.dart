@@ -83,7 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.black : Colors.white,
+              color: isSelected ? Colors.white : AppColors.textSecondary,
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             ),
@@ -237,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text(
                 'WATCHHUB',
                 style: TextStyle(
-                  color: Colors.black,
+                  color: Colors.white,
                   fontWeight: FontWeight.w900,
                   fontSize: 13,
                   letterSpacing: 1.5,
@@ -351,13 +351,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
-                  _buildCategoryChip(0, '🔥 All & Trending'),
+                  _buildCategoryChip(0, 'All'),
                   const SizedBox(width: 8),
-                  _buildCategoryChip(1, '⛩️ Anime & Animation'),
+                  _buildCategoryChip(1, 'Anime & Animation'),
                   const SizedBox(width: 8),
-                  _buildCategoryChip(2, '🎬 Movies'),
+                  _buildCategoryChip(2, 'Movies'),
                   const SizedBox(width: 8),
-                  _buildCategoryChip(3, '📺 TV Series'),
+                  _buildCategoryChip(3, 'TV Series'),
                 ],
               ),
             ),

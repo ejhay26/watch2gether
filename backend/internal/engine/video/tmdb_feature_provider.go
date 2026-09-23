@@ -216,12 +216,7 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 		return nil
 	}
 
-	// Add fast adaptive fallback mirror
-	sources = append(sources, model.Source{
-		URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
-		Quality: "720p Adaptive Stream (Server 3)",
-		IsM3U8:  true,
-	})
+
 
 	if len(subtitles) == 0 {
 		subtitles = append(subtitles, model.Subtitle{URL: "", Lang: "English (Auto)"})
@@ -330,17 +325,5 @@ func (p *TMDBFeatureProvider) ResolveFeatureStream(ctx context.Context, mediaID 
 		return trailer, nil
 	}
 
-	// 4. Default high-speed adaptive presentation
-	return &model.StreamResult{
-		Sources: []model.Source{
-			{
-				URL:     "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
-				Quality: "1080p Adaptive Stream (Server 1)",
-				IsM3U8:  true,
-			},
-		},
-		Subtitles: []model.Subtitle{
-			{URL: "", Lang: "English"},
-		},
-	}, nil
+	return nil, fmt.Errorf("no feature stream found for %s", displayTitle)
 }

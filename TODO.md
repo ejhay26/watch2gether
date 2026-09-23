@@ -1,47 +1,53 @@
-# Watch2Gether Ralph Loop Backlog
+# Watch2Gether Ralph Loop Backlog (Updated Iteration)
 
-Overall Goal: Full-stack, multiplatform ad-free streaming, anime/cartoons/shows support, YouTube-style player layout, in-player episode navigation, batteries-included Go security, and zero fallback short videos.
-Target Architecture: Go (Fiber) Backend (Local + Ngrok Tunnel), Ani-cli / HiAnime scraper engine with otaku-embed-v1 XOR decryption, Supabase (PostgreSQL & Auth), Flutter Frontend (Windows/Android).
-Current Status: All Ralph Loop Tasks Completed & Verified Live <!-- GOAL_COMPLETE -->
+Overall Goal: Eliminate all blocked fallbacks, fix movie/TV stream scrapers, report Consumet findings, implement Dub/Sub selector, fix category tags, YouTube-style player (sidebar Up Next, below-player episode grid), fix click bleed-through, upward dropdowns, remove all emojis, and apply premium Electric Indigo color palette.
+Current Status: Ralph Loop Active Execution - Loop 11 Final Build & Verification
 
-## Loop 1: Eliminate All Fake Fallback Videos & Block Handling
-- [x] 1.1 Remove all hardcoded instances of Tears of Steel from `media_overview_modal.dart`, `tmdb_feature_provider.go`, and `engine.go`.
-- [x] 1.2 Implement transparent error reporting when a stream cannot be resolved instead of silently substituting unrelated videos.
+## Loop 7: Consumet Investigation & Real Movie/TV Stream Scraper
+- [x] 7.1 Report on Consumet: Tested all 5 movie providers in `@consumet/extensions` (FlixHQ, Goku, SFlix, HiMovies, DramaCool) -> All failed with HTTP 522 Cloudflare blocks or ECONNREFUSED.
+- [x] 7.2 Remove all hardcoded Tears of Steel and Big Buck Bunny references from `backend/internal/engine/video/tmdb_feature_provider.go` and `video/engine.go`.
+- [x] 7.3 Implement dynamic Archive.org full movie scraper in `ArchiveProvider`:
+  - Search Archive.org movies by title and year.
+  - Inspect files metadata for feature MP4/MKV (> 250MB).
+  - Stream real 1080p/720p movies (verified working for Rush Hour 1, 2, 3, etc.).
+- [x] 7.4 Multi-source streaming fallback for modern films & TV shows with transparent error handling (no fallback short videos).
 
-## Loop 2: Ani-Cli & HiAnime Multi-Source Scraper Engine (Anime, Cartoons & TV Shows)
-- [x] 2.1 Research and analyze `MovieBox-TUI` (Showbox HMAC-MD5 signing, aoneroom host pool, Stremio addon aggregation) and `ani-cli` (HiAnime base API, episode endpoints, ZokoAnime otaku-embed-v1 XOR deobfuscation).
-- [x] 2.2 Implement HiAnime scraper in backend:
-  - Search anime and cartoons (`https://hianime.at/search?keyword=`)
-  - Parse full episode lists (`/api/theme/episode/list/{id}`)
-  - Resolve Sub and Dub servers (`/api/theme/episode/servers?episodeId=`)
-  - Extract decrypted 1080p HLS master `.m3u8` and English `.vtt` subtitles via `otaku-embed-v1` XOR decoding.
-- [x] 2.3 Expose anime & cartoon catalog in search, details, episodes, and sources.
+## Loop 8: Tagging, Category & Sub/Dub Audio Precision
+- [x] 8.1 Fix media categorization: Movies must never display "Series / Anime", "EP 1", or episode panels.
+- [x] 8.2 Implement Dub vs Sub selection for anime (e.g. Frieren):
+  - Parse both `[SUB]` (Japanese) and `[DUB]` (English) servers from HiAnime/ZokoAnime.
+  - Add explicit Dub / Sub version toggle in `media_overview_modal.dart`.
+  - In `desktop_hud.dart` audio selector: list `[DUB] English Dub` and `[SUB] Japanese Audio` and switch server live while preserving timestamp.
+- [x] 8.3 Handle multi-season anime indexing (e.g. Frieren Season 1 and Season 2).
 
-## Loop 3: Go Framework Batteries-Included Security Layer
-- [x] 3.1 Implement Fiber rate limiting (`limiter` middleware) per client IP (120 req/min).
-- [x] 3.2 Implement Fiber security headers (`helmet` style: X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Permissions-Policy, Referrer-Policy, ngrok bypass).
-- [x] 3.3 Implement input sanitization (null byte, path traversal protection) and panic recovery middleware in Fiber.
-- [x] 3.4 Verify backend health and security headers via HTTP test.
+## Loop 9: Color Scheme, Palette & UI Anti-Slop (No Emojis)
+- [x] 9.1 Remove all emojis across the UI (replace with clean, professional typography: "All", "Anime & Animation", "Movies", "TV Series").
+- [x] 9.2 Refactor `frontend/lib/constants/theme.dart` with an ultra-premium Electric Indigo / Sapphire & Deep Obsidian palette:
+  - Background: `#090B10`
+  - Surface: `#0F131C`
+  - Surface Elevated: `#161B26`
+  - Surface Border: `#232B3C`
+  - Accent: `#6366F1` (Indigo Sapphire)
+  - Accent Bright: `#818CF8`
+  - Rating Amber: `#F59E0B`
+  - Text Primary: `#F8FAFC`, Muted: `#94A3B8`
+- [x] 9.3 Apply theme consistently across all modals, home screen, player HUD, and drawers.
 
-## Loop 4: In-Player Seasons & Episodes Navigation & Player UX
-- [x] 4.1 Update double-tap seek to 5 seconds (was 10s) in `desktop_hud.dart` and `mobile_gestures.dart`.
-- [x] 4.2 Make volume slider wider (140px width) in `desktop_hud.dart`.
-- [x] 4.3 Build Seasons & Episodes sidebar drawer in `player_screen.dart`:
-  - Show Season dropdown / selector.
-  - List all episodes with number, title, and current playing indicator.
-  - One-tap episode switching without leaving the player.
-  - Works seamlessly in both fullscreen and windowed modes.
+## Loop 10: Player Layout, Below-Player Episode Grid & Click Bleed-Through Fix
+- [x] 10.1 In windowed mode:
+  - Right sidebar: ONLY display "Up Next" (recommended films).
+  - Below video player: Season dropdown/chips + Seasons & Episodes displayed as an organized, sleek GRID (not overflowing horizontal scroll).
+- [x] 10.2 In fullscreen mode:
+  - Seasons & Episodes accessible via sliding sidebar drawer from HUD icon button.
+- [x] 10.3 Fix click bleed-through:
+  - Isolate pointer events in sliding drawers with `GestureDetector(behavior: HitTestBehavior.opaque)` and `IgnorePointer` so clicks do not trigger underlying controls (e.g. Watch Together button).
+  - Remove redundant "Watch Together" button from HUD top bar in windowed mode.
+- [x] 10.4 Fix dropdown directions:
+  - Ensure HUD bottom bar popup menus open upward naturally above the bar (`PopupMenuPosition.over`).
+  - Ensure season selector opens in the natural direction without glitchy offsets.
 
-## Loop 5: YouTube-Style Windowed Player Layout
-- [x] 5.1 Implement YouTube-style responsive layout in `player_screen.dart` when not in fullscreen:
-  - Desktop/wide view: video player on left (16:9), recommended titles / up next queue on right sidebar.
-  - Mobile/narrow view: video player on top (16:9), recommended titles / episodes below.
-  - In fullscreen mode: video player occupies full viewport with slide-over drawers for Chat and Episodes.
-- [x] 5.2 Add category filter chips on Home Screen ("🔥 All & Trending", "⛩️ Anime & Animation", "🎬 Movies", "📺 TV Series").
-
-## Loop 6: End-to-End Build & Visual Verification
-- [x] 6.1 Compile Go backend (`server.exe`) and restart service on port 8080 and ngrok.
-- [x] 6.2 Build Flutter Windows application (`watch2gether.exe`).
-- [x] 6.3 Test playback across anime, cartoons, series, and movies (Arcane, Naruto, One Piece).
-- [x] 6.4 Verify zero fallback videos, double-tap 5s seek, wide volume slider, and YouTube-style windowed layout.
-- [x] 6.5 Commit all changes to Git and push to origin.
+## Loop 11: End-to-End Build, Verification & Release
+- [x] 11.1 Recompile backend `server.exe` and test live endpoints (Rush Hour, Frieren Dub/Sub, Arcane).
+- [ ] 11.2 Rebuild Flutter Windows application (`watch2gether.exe`).
+- [ ] 11.3 Verify playback across movies, anime, and series.
+- [ ] 11.4 Commit all changes to Git and push to origin.

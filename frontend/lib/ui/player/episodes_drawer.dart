@@ -26,7 +26,10 @@ class EpisodesDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      onTap: () {},
+      behavior: HitTestBehavior.opaque,
+      child: Container(
       width: 340,
       decoration: const BoxDecoration(
         color: AppColors.surface,
@@ -215,6 +218,7 @@ class EpisodesDrawer extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

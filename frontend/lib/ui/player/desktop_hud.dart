@@ -220,8 +220,8 @@ class DesktopHUD extends StatelessWidget {
                           tooltip: isChatOpen ? 'Close Chat' : 'Open Chat',
                           onPressed: onToggleChat,
                         ),
-                      ] else ...[
-                        // Solo Mode: Button to initiate a room on demand
+                      ] else if (isFullscreen) ...[
+                        // Solo Mode (Fullscreen only): Button to initiate a room on demand
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.surfaceElevated.withOpacity(0.85),
@@ -367,9 +367,10 @@ class DesktopHUD extends StatelessWidget {
                         PopupMenuButton<String>(
                           tooltip: 'Audio Dub / Languages',
                           icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 20),
-                          color: const Color(0xFF1B1E28),
+                          color: AppColors.surfaceElevated,
                           elevation: 8,
-                          offset: const Offset(0, -180),
+                          position: PopupMenuPosition.over,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                           constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
                             final tracks = availableAudioTracks.isNotEmpty
@@ -411,9 +412,10 @@ class DesktopHUD extends StatelessWidget {
                         PopupMenuButton<String>(
                           tooltip: 'Subtitles / Captions',
                           icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 20),
-                          color: const Color(0xFF1B1E28),
+                          color: AppColors.surfaceElevated,
                           elevation: 8,
-                          offset: const Offset(0, -220),
+                          position: PopupMenuPosition.over,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                           constraints: const BoxConstraints(minWidth: 220, maxWidth: 360),
                           itemBuilder: (ctx) {
                             final subs = availableSubtitles.isNotEmpty
@@ -456,9 +458,10 @@ class DesktopHUD extends StatelessWidget {
                           PopupMenuButton<StreamSource>(
                             tooltip: 'Dynamic Sources & Quality',
                             icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
-                            color: const Color(0xFF1B1E28),
+                            color: AppColors.surfaceElevated,
                             elevation: 8,
-                            offset: const Offset(0, -200),
+                            position: PopupMenuPosition.over,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.surfaceBorder)),
                             constraints: const BoxConstraints(minWidth: 240, maxWidth: 380),
                             itemBuilder: (ctx) {
                               return streamResult!.sources.map((src) {

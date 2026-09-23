@@ -30,6 +30,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
   int _selectedSeason = 1;
   bool _isLoadingEpisodes = false;
   bool _isLaunchingPlayer = false;
+  bool _preferDub = false;
 
   @override
   void initState() {
@@ -65,7 +66,12 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     }
   }
 
-  bool get _isSeries => (_details?.type ?? widget.item.type) == 'tv';
+  bool get _isSeries {
+    final id = widget.item.id;
+    if (id.contains('movie')) return false;
+    final type = _details?.type ?? widget.item.type;
+    return type == 'tv' || id.startsWith('anime-');
+  }
 
   Future<void> _playMedia({Episode? episode, bool createRoom = false}) async {
     setState(() => _isLaunchingPlayer = true);
@@ -73,7 +79,22 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     try {
       final epId = episode?.id ?? (_episodes.isNotEmpty ? _episodes[0].id : widget.item.id);
       final srvs = await _api.getServers(epId);
-      final srvId = srvs.isNotEmpty ? srvs[0].id : epId;
+      String srvId = epId;
+      if (srvs.isNotEmpty) {
+        if (_preferDub) {
+          final dubSrv = srvs.firstWhere(
+            (s) => s.name.toUpperCase().contains('[DUB]'),
+            orElse: () => srvs.first,
+          );
+          srvId = dubSrv.id;
+        } else {
+          final subSrv = srvs.firstWhere(
+            (s) => s.name.toUpperCase().contains('[SUB]'),
+            orElse: () => srvs.first,
+          );
+          srvId = subSrv.id;
+        }
+      }
 
       final streamRes = await _api.getSources(srvId, title: widget.item.title);
       if (streamRes == null || streamRes.sources.isEmpty) {
@@ -144,7 +165,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
             maxHeight: MediaQuery.of(context).size.height * 0.9,
           ),
           decoration: BoxDecoration(
-            color: const Color(0xFF111319),
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: Colors.white.withOpacity(0.08)),
             boxShadow: [
@@ -186,8 +207,8 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                               colors: [
                                 Colors.black.withOpacity(0.4),
                                 Colors.transparent,
-                                const Color(0xFF111319).withOpacity(0.8),
-                                const Color(0xFF111319),
+                                AppColors.surface.withOpacity(0.8),
+                                AppColors.surface,
                               ],
                               stops: const [0.0, 0.3, 0.8, 1.0],
                             ),
@@ -315,11 +336,64 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                     ],
                   ),
 
-                  // Action Buttons (Play Solo + Watch Together)
+                  // Action Buttons (Play Solo + Watch Together + Sub/Dub)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(28, 16, 28, 16),
                     child: Row(
                       children: [
+                        if (_isSeries) ...[
+                          Container(
+                            margin: const EdgeInsets.only(right: 14),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceElevated,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.surfaceBorder),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                InkWell(
+                                  onTap: () => setState(() => _preferDub = false),
+                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: !_preferDub ? AppColors.accent : Colors.transparent,
+                                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
+                                    ),
+                                    child: Text(
+                                      'SUB (Japanese)',
+                                      style: TextStyle(
+                                        color: !_preferDub ? Colors.white : AppColors.textSecondary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                InkWell(
+                                  onTap: () => setState(() => _preferDub = true),
+                                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(10)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: _preferDub ? AppColors.accent : Colors.transparent,
+                                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(10)),
+                                    ),
+                                    child: Text(
+                                      'DUB (English)',
+                                      style: TextStyle(
+                                        color: _preferDub ? Colors.white : AppColors.textSecondary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Play Solo Button (Primary)
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
@@ -430,14 +504,14 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1B1E28),
+                              color: AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: Colors.white12),
                             ),
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<int>(
                                 value: _selectedSeason,
-                                dropdownColor: const Color(0xFF1B1E28),
+                                dropdownColor: AppColors.surfaceElevated,
                                 icon: const Icon(Icons.arrow_drop_down, color: AppColors.accent),
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                                 items: (media.seasons ?? [1]).map((s) {

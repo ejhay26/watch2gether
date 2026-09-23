@@ -413,30 +413,15 @@ func (c *CatalogEngine) GetDetails(ctx context.Context, id string) (*model.Media
 func (c *CatalogEngine) GetEpisodes(ctx context.Context, id string, season int) ([]model.Episode, error) {
 	parts := strings.Split(id, "-")
 	if len(parts) < 3 {
-		return []model.Episode{
-			{
-				ID:       fmt.Sprintf("%s-ep1", id),
-				Number:   1,
-				Season:   1,
-				Title:    "Full Movie",
-				Overview: "Play feature presentation.",
-			},
-		}, nil
+		return []model.Episode{}, nil
 	}
 
 	mType := parts[1]
 	tmdbID := parts[2]
 
 	if mType == "movie" {
-		return []model.Episode{
-			{
-				ID:       fmt.Sprintf("%s-ep1", id),
-				Number:   1,
-				Season:   1,
-				Title:    "Full Movie",
-				Overview: "Play feature presentation.",
-			},
-		}, nil
+		// Movies do not have episodic breakdown
+		return []model.Episode{}, nil
 	}
 
 	// TV Show episodes

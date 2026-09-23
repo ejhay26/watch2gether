@@ -146,9 +146,13 @@ class ApiService {
     }
   }
 
-  Future<List<Server>> getServers(String episodeId) async {
+  Future<List<Server>> getServers(String episodeId, {String? title}) async {
     try {
-      final res = await _dio.get('/api/v1/servers', queryParameters: {'episodeId': episodeId});
+      final queryParams = <String, dynamic>{'episodeId': episodeId};
+      if (title != null && title.isNotEmpty) {
+        queryParams['title'] = title;
+      }
+      final res = await _dio.get('/api/v1/servers', queryParameters: queryParams);
       final srvs = (res.data['servers'] as List<dynamic>?) ?? [];
       return srvs.map((e) => Server.fromJson(e)).toList();
     } catch (e) {
