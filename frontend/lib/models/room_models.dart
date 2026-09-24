@@ -53,6 +53,7 @@ class RoomStateData {
   final String title;
   final String streamUrl;
   final String episodeId;
+  final Map<String, String>? headers;
   final double playbackPosition;
   final bool isPlaying;
   final List<Participant> participants;
@@ -66,6 +67,7 @@ class RoomStateData {
     required this.title,
     required this.streamUrl,
     required this.episodeId,
+    this.headers,
     required this.playbackPosition,
     required this.isPlaying,
     required this.participants,
@@ -86,6 +88,7 @@ class RoomStateData {
     String? title,
     String? streamUrl,
     String? episodeId,
+    Map<String, String>? headers,
     double? playbackPosition,
     bool? isPlaying,
     List<Participant>? participants,
@@ -99,6 +102,7 @@ class RoomStateData {
       title: title ?? this.title,
       streamUrl: streamUrl ?? this.streamUrl,
       episodeId: episodeId ?? this.episodeId,
+      headers: headers ?? this.headers,
       playbackPosition: playbackPosition ?? this.playbackPosition,
       isPlaying: isPlaying ?? this.isPlaying,
       participants: participants ?? this.participants,
@@ -118,6 +122,7 @@ class RoomStateData {
       title: json['title'] ?? '',
       streamUrl: json['stream_url'] ?? '',
       episodeId: json['episode_id'] ?? '',
+      headers: (json['headers'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v.toString())),
       playbackPosition: (json['playback_position'] as num?)?.toDouble() ?? 0.0,
       isPlaying: json['is_playing'] ?? false,
       participants: rawParts.map((e) => Participant.fromJson(e)).toList(),

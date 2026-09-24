@@ -44,7 +44,7 @@ func TestRoomLifecycleAndSync(t *testing.T) {
 	hub := NewHub()
 
 	// 1. Create Room
-	room := hub.CreateRoom("host-1", "demo-sintel", "Sintel 4K", "https://test.m3u8", "ep1")
+	room := hub.CreateRoom("host-1", "demo-sintel", "Sintel 4K", "https://test.m3u8", "ep1", nil)
 	if len(room.ID) != 6 {
 		t.Fatalf("Expected 6-char room code, got %s", room.ID)
 	}

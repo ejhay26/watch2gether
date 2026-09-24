@@ -1,9 +1,13 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../constants/theme.dart';
 import '../../models/media_item.dart' hide SubtitleTrack;
 
-class DesktopHUD extends StatelessWidget {
+class DesktopHUD extends StatefulWidget {
+  final bool isPartySynced;
+  final VoidCallback? onTogglePartySync;
   final bool isVisible;
   final String title;
   final String? subtitle;
@@ -73,7 +77,16 @@ class DesktopHUD extends StatelessWidget {
     this.onSelectQuality,
     this.onSelectAudioTrack,
     this.onSelectSubtitle,
+    this.isPartySynced = true,
+    this.onTogglePartySync,
   });
+
+  @override
+  State<DesktopHUD> createState() => _DesktopHUDState();
+}
+
+class _DesktopHUDState extends State<DesktopHUD> {
+  double? _dragPercent;
 
   String _formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -112,11 +125,11 @@ class DesktopHUD extends StatelessWidget {
                 const SizedBox(height: 16),
 
                 // Quality tile
-                if (streamResult != null && streamResult!.sources.isNotEmpty)
+                if (widget.streamResult != null && widget.streamResult!.sources.isNotEmpty)
                   ListTile(
                     leading: const Icon(Icons.tune_rounded, color: AppColors.accent),
                     title: const Text('Video Quality', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    subtitle: Text(currentQuality, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    subtitle: Text(widget.currentQuality, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                     trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
                     onTap: () {
                       Navigator.pop(ctx);
@@ -128,7 +141,7 @@ class DesktopHUD extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.audiotrack_rounded, color: AppColors.accent),
                   title: const Text('Audio Dub / Language', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: Text(currentAudioTrack, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  subtitle: Text(widget.currentAudioTrack, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                   trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -140,7 +153,7 @@ class DesktopHUD extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.subtitles_rounded, color: AppColors.accent),
                   title: const Text('Subtitles / Captions', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: Text(currentSubtitle, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  subtitle: Text(widget.currentSubtitle, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                   trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -156,7 +169,7 @@ class DesktopHUD extends StatelessWidget {
   }
 
   void _showQualitySubSheet(BuildContext context) {
-    if (streamResult == null || streamResult!.sources.isEmpty) return;
+    if (widget.streamResult == null || widget.streamResult!.sources.isEmpty) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF13151F),
@@ -172,8 +185,8 @@ class DesktopHUD extends StatelessWidget {
                 padding: EdgeInsets.all(16),
                 child: Text('Select Quality', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
               ),
-              ...streamResult!.sources.map((src) {
-                final isSelected = src.quality == currentQuality || (currentQuality == 'Auto' && src == streamResult!.sources.first);
+              ...widget.streamResult!.sources.map((src) {
+                final isSelected = src.quality == widget.currentQuality || (widget.currentQuality == 'Auto' && src == widget.streamResult!.sources.first);
                 return ListTile(
                   leading: Icon(
                     isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
@@ -182,7 +195,7 @@ class DesktopHUD extends StatelessWidget {
                   title: Text(src.quality, style: TextStyle(color: isSelected ? AppColors.accent : Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                   onTap: () {
                     Navigator.pop(ctx);
-                    onSelectQuality?.call(src);
+                    widget.onSelectQuality?.call(src);
                   },
                 );
               }),
@@ -194,8 +207,8 @@ class DesktopHUD extends StatelessWidget {
   }
 
   void _showAudioSubSheet(BuildContext context) {
-    final tracks = availableAudioTracks.isNotEmpty
-        ? availableAudioTracks
+    final tracks = widget.availableAudioTracks.isNotEmpty
+        ? widget.availableAudioTracks
         : ['Audio 1: English (Stereo)', 'Audio 2: Multi-Audio'];
     showModalBottomSheet(
       context: context,
@@ -214,7 +227,7 @@ class DesktopHUD extends StatelessWidget {
                   child: Text('Select Audio Track', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
                 ...tracks.map((track) {
-                  final isSelected = track == currentAudioTrack || (currentAudioTrack == 'Default' && track.contains('1'));
+                  final isSelected = track == widget.currentAudioTrack || (widget.currentAudioTrack == 'Default' && track.contains('1'));
                   return ListTile(
                     leading: Icon(
                       isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
@@ -223,7 +236,7 @@ class DesktopHUD extends StatelessWidget {
                     title: Text(track, style: TextStyle(color: isSelected ? AppColors.accent : Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                     onTap: () {
                       Navigator.pop(ctx);
-                      onSelectAudioTrack?.call(track);
+                      widget.onSelectAudioTrack?.call(track);
                     },
                   );
                 }),
@@ -236,8 +249,8 @@ class DesktopHUD extends StatelessWidget {
   }
 
   void _showSubtitleSubSheet(BuildContext context) {
-    final subs = availableSubtitles.isNotEmpty
-        ? availableSubtitles
+    final subs = widget.availableSubtitles.isNotEmpty
+        ? widget.availableSubtitles
         : ['Off', 'English [CC]', 'Spanish', 'French', 'German'];
     showModalBottomSheet(
       context: context,
@@ -256,7 +269,7 @@ class DesktopHUD extends StatelessWidget {
                   child: Text('Select Subtitles', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
                 ...subs.map((s) {
-                  final isSelected = s == currentSubtitle || (currentSubtitle == 'Off' && s == 'Off');
+                  final isSelected = s == widget.currentSubtitle || (widget.currentSubtitle == 'Off' && s == 'Off');
                   return ListTile(
                     leading: Icon(
                       isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
@@ -265,7 +278,7 @@ class DesktopHUD extends StatelessWidget {
                     title: Text(s, style: TextStyle(color: isSelected ? AppColors.accent : Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                     onTap: () {
                       Navigator.pop(ctx);
-                      onSelectSubtitle?.call(s);
+                      widget.onSelectSubtitle?.call(s);
                     },
                   );
                 }),
@@ -279,8 +292,41 @@ class DesktopHUD extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPartySynced = widget.isPartySynced;
+    final onTogglePartySync = widget.onTogglePartySync;
+    final isVisible = widget.isVisible;
+    final title = widget.title;
+    final subtitle = widget.subtitle;
+    final isPlaying = widget.isPlaying;
+    final position = widget.position;
+    final duration = widget.duration;
+    final volume = widget.volume;
+    final isMuted = widget.isMuted;
+    final isFullscreen = widget.isFullscreen;
+    final isRoom = widget.isRoom;
+    final roomCode = widget.roomCode;
+    final participantCount = widget.participantCount;
+    final isChatOpen = widget.isChatOpen;
+    final hasEpisodes = widget.hasEpisodes;
+    final isEpisodesOpen = widget.isEpisodesOpen;
+    final streamResult = widget.streamResult;
+    final availableAudioTracks = widget.availableAudioTracks;
+    final availableSubtitles = widget.availableSubtitles;
+    final onPlayPause = widget.onPlayPause;
+    final onSeek = widget.onSeek;
+    final onVolumeChange = widget.onVolumeChange;
+    final onToggleMute = widget.onToggleMute;
+    final onToggleFullscreen = widget.onToggleFullscreen;
+    final onToggleChat = widget.onToggleChat;
+    final onToggleEpisodes = widget.onToggleEpisodes;
+    final onBack = widget.onBack;
+    final onCreateRoom = widget.onCreateRoom;
+    final onSelectQuality = widget.onSelectQuality;
+    final onSelectAudioTrack = widget.onSelectAudioTrack;
+    final onSelectSubtitle = widget.onSelectSubtitle;
+    final isMobilePlatform = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
+    final isMobile = isMobilePlatform || screenWidth < 650;
 
     return AnimatedOpacity(
       opacity: isVisible ? 1.0 : 0.0,
@@ -452,6 +498,41 @@ class DesktopHUD extends StatelessWidget {
                                       ),
                                     ),
                                   ),
+                                  if (onTogglePartySync != null) ...[
+                                    const SizedBox(width: 6),
+                                    InkWell(
+                                      onTap: onTogglePartySync,
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: isPartySynced ? Colors.green.withValues(alpha: 0.2) : Colors.orange.withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: isPartySynced ? Colors.greenAccent : Colors.orangeAccent, width: 0.8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isPartySynced ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+                                              color: isPartySynced ? Colors.greenAccent : Colors.orangeAccent,
+                                              size: 13,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              isPartySynced ? 'SYNCED' : 'ALONE',
+                                              style: TextStyle(
+                                                color: isPartySynced ? Colors.greenAccent : Colors.orangeAccent,
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ],
                             ),
@@ -511,7 +592,9 @@ class DesktopHUD extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            _formatDuration(position),
+                            _formatDuration(_dragPercent != null && duration.inMilliseconds > 0
+                                ? Duration(milliseconds: (_dragPercent! * duration.inMilliseconds).toInt())
+                                : position),
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: isMobile ? 10.5 : 12,
@@ -531,12 +614,19 @@ class DesktopHUD extends StatelessWidget {
                                 trackShape: const RectangularSliderTrackShape(),
                               ),
                               child: Slider(
-                                value: duration.inMilliseconds > 0
+                                value: _dragPercent ?? (duration.inMilliseconds > 0
                                     ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
-                                    : 0.0,
-                                onChanged: (percent) {
+                                    : 0.0),
+                                onChangeStart: (p) {
+                                  setState(() => _dragPercent = p);
+                                },
+                                onChanged: (p) {
+                                  setState(() => _dragPercent = p);
+                                },
+                                onChangeEnd: (percent) {
                                   final targetMs = (percent * duration.inMilliseconds).toInt();
                                   onSeek(Duration(milliseconds: targetMs));
+                                  setState(() => _dragPercent = null);
                                 },
                               ),
                             ),
@@ -554,96 +644,103 @@ class DesktopHUD extends StatelessWidget {
 
                       const SizedBox(height: 2),
 
-                      // Controls Row - ZERO OVERFLOW GUARANTEED
-                      Row(
-                        children: [
-                          // Play/Pause
-                          IconButton(
-                            icon: Icon(
-                              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                              color: Colors.white,
-                              size: 26,
-                            ),
-                            visualDensity: VisualDensity.compact,
-                            onPressed: onPlayPause,
-                          ),
+                      // Controls Row - Responsive LayoutBuilder (Guarantees 0 Overflow)
+                      LayoutBuilder(
+                        builder: (ctx, constraints) {
+                          final availW = constraints.maxWidth;
+                          final showVolSlider = !isMobilePlatform && availW > 680;
+                          final showIndividualMenus = !isMobilePlatform && availW > 560;
 
-                          // Rewind 5s
-                          IconButton(
-                            icon: const Icon(Icons.replay_5_rounded, color: Colors.white70, size: 20),
-                            tooltip: 'Rewind 5s',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () {
-                              final target = position - const Duration(seconds: 5);
-                              onSeek(target < Duration.zero ? Duration.zero : target);
-                            },
-                          ),
-
-                          // Fast Forward 5s
-                          IconButton(
-                            icon: const Icon(Icons.forward_5_rounded, color: Colors.white70, size: 20),
-                            tooltip: 'Fast Forward 5s',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () {
-                              final target = position + const Duration(seconds: 5);
-                              onSeek(target > duration ? duration : target);
-                            },
-                          ),
-
-                          // Volume (Desktop only: shows slider; Mobile: hardware rocker is standard)
-                          if (!isMobile) ...[
-                            IconButton(
-                              icon: Icon(
-                                isMuted || volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: isMuted ? 'Unmute' : 'Mute',
-                              visualDensity: VisualDensity.compact,
-                              onPressed: onToggleMute,
-                            ),
-                            SizedBox(
-                              width: 130,
-                              child: SliderTheme(
-                                data: SliderThemeData(
-                                  trackHeight: 2,
-                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
-                                  activeTrackColor: Colors.white,
-                                  inactiveTrackColor: AppColors.surfaceBorder,
-                                  thumbColor: Colors.white,
+                          return Row(
+                            children: [
+                              // Play/Pause
+                              IconButton(
+                                icon: Icon(
+                                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 26,
                                 ),
-                                child: Slider(
-                                  value: isMuted ? 0.0 : volume,
-                                  onChanged: onVolumeChange,
+                                visualDensity: VisualDensity.compact,
+                                onPressed: onPlayPause,
+                              ),
+
+                              // Rewind 5s
+                              IconButton(
+                                icon: const Icon(Icons.replay_5_rounded, color: Colors.white70, size: 20),
+                                tooltip: 'Rewind 5s',
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () {
+                                  final target = position - const Duration(seconds: 5);
+                                  onSeek(target < Duration.zero ? Duration.zero : target);
+                                },
+                              ),
+
+                              // Fast Forward 5s
+                              IconButton(
+                                icon: const Icon(Icons.forward_5_rounded, color: Colors.white70, size: 20),
+                                tooltip: 'Fast Forward 5s',
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () {
+                                  final target = position + const Duration(seconds: 5);
+                                  onSeek(target > duration ? duration : target);
+                                },
+                              ),
+
+                              // Volume (Desktop only when space permits)
+                              if (!isMobilePlatform) ...[
+                                IconButton(
+                                  icon: Icon(
+                                    isMuted || volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  tooltip: isMuted ? 'Unmute' : 'Mute',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: onToggleMute,
                                 ),
-                              ),
-                            ),
-                          ],
+                                if (showVolSlider)
+                                  SizedBox(
+                                    width: 110,
+                                    child: SliderTheme(
+                                      data: SliderThemeData(
+                                        trackHeight: 2,
+                                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
+                                        activeTrackColor: Colors.white,
+                                        inactiveTrackColor: AppColors.surfaceBorder,
+                                        thumbColor: Colors.white,
+                                      ),
+                                      child: Slider(
+                                        value: isMuted ? 0.0 : volume,
+                                        onChanged: onVolumeChange,
+                                      ),
+                                    ),
+                                  ),
+                              ],
 
-                          const Spacer(),
+                              const Spacer(),
 
-                          // Seasons & Episodes Button (fullscreen series)
-                          if (isFullscreen && hasEpisodes && onToggleEpisodes != null)
-                            IconButton(
-                              icon: Icon(
-                                Icons.video_library_rounded,
-                                color: isEpisodesOpen ? AppColors.accent : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: isEpisodesOpen ? 'Close Episodes' : 'Seasons & Episodes',
-                              visualDensity: VisualDensity.compact,
-                              onPressed: onToggleEpisodes,
-                            ),
+                              // Seasons & Episodes Button (fullscreen series)
+                              if (isFullscreen && hasEpisodes && onToggleEpisodes != null)
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.video_library_rounded,
+                                    color: isEpisodesOpen ? AppColors.accent : Colors.white,
+                                    size: 20,
+                                  ),
+                                  tooltip: isEpisodesOpen ? 'Close Episodes' : 'Seasons & Episodes',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: onToggleEpisodes,
+                                ),
 
-                          // If Mobile: Consolidate Audio, Subtitles, Quality into a single Quick Settings button
-                          if (isMobile) ...[
-                            IconButton(
-                              icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 21),
-                              tooltip: 'Quality & Audio Settings',
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => _showMobileSettingsSheet(context),
-                            ),
-                          ] else ...[
+                              // Quick Settings Button (Mobile or constrained width)
+                              if (!showIndividualMenus) ...[
+                                IconButton(
+                                  icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 21),
+                                  tooltip: 'Quality & Audio Settings',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _showMobileSettingsSheet(context),
+                                ),
+                              ] else ...[
                             // Desktop: Individual Upward Popup Menus
                             // Audio Dub / Track Selector
                             PopupMenuButton<String>(
@@ -660,7 +757,7 @@ class DesktopHUD extends StatelessWidget {
                                     ? availableAudioTracks
                                     : ['Audio 1: English (Stereo)', 'Audio 2: Multi-Audio'];
                                 return tracks.map((track) {
-                                  final isSelected = track == currentAudioTrack || (currentAudioTrack == 'Default' && track.contains('1'));
+                                  final isSelected = track == widget.currentAudioTrack || (widget.currentAudioTrack == 'Default' && track.contains('1'));
                                   return PopupMenuItem<String>(
                                     value: track,
                                     child: Row(
@@ -706,7 +803,7 @@ class DesktopHUD extends StatelessWidget {
                                     ? availableSubtitles
                                     : ['Off', 'English [CC]', 'Spanish', 'French', 'German'];
                                 return subs.map((s) {
-                                  final isSelected = s == currentSubtitle || (currentSubtitle == 'Off' && s == 'Off');
+                                  final isSelected = s == widget.currentSubtitle || (widget.currentSubtitle == 'Off' && s == 'Off');
                                   return PopupMenuItem<String>(
                                     value: s,
                                     child: Row(
@@ -738,7 +835,7 @@ class DesktopHUD extends StatelessWidget {
                             ),
 
                             // Dynamic Quality & Sources Selector
-                            if (streamResult != null && streamResult!.sources.isNotEmpty)
+                            if (widget.streamResult != null && widget.streamResult!.sources.isNotEmpty)
                               PopupMenuButton<StreamSource>(
                                 tooltip: 'Dynamic Sources & Quality',
                                 icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
@@ -750,7 +847,7 @@ class DesktopHUD extends StatelessWidget {
                                 constraints: const BoxConstraints(minWidth: 240, maxWidth: 380),
                                 itemBuilder: (ctx) {
                                   return streamResult!.sources.map((src) {
-                                    final isSelected = src.quality == currentQuality || (currentQuality == 'Auto' && src == streamResult!.sources.first);
+                                    final isSelected = src.quality == widget.currentQuality || (widget.currentQuality == 'Auto' && src == widget.streamResult!.sources.first);
                                     return PopupMenuItem<StreamSource>(
                                       value: src,
                                       child: Row(
@@ -794,7 +891,9 @@ class DesktopHUD extends StatelessWidget {
                             onPressed: onToggleFullscreen,
                           ),
                         ],
-                      ),
+                      );
+                    },
+                  ),
                     ],
                   ),
                 ),

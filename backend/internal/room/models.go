@@ -42,6 +42,7 @@ type WSMessage struct {
 	Title       string         `json:"title,omitempty"`
 	StreamURL   string         `json:"stream_url,omitempty"`
 	EpisodeID   string         `json:"episode_id,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
 	Message     string         `json:"message,omitempty"`
 	RoomState   *RoomStateData `json:"room_state,omitempty"`
 	User        *Participant   `json:"user,omitempty"`
@@ -55,6 +56,7 @@ type RoomStateData struct {
 	Title            string        `json:"title"`
 	StreamURL        string        `json:"stream_url"`
 	EpisodeID        string        `json:"episode_id"`
+	Headers          map[string]string `json:"headers,omitempty"`
 	PlaybackPosition float64       `json:"playback_position"`
 	IsPlaying        bool          `json:"is_playing"`
 	Participants     []Participant `json:"participants"`

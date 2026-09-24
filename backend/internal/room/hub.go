@@ -29,7 +29,7 @@ func GenerateRoomCode() string {
 	return string(b)
 }
 
-func (h *Hub) CreateRoom(hostID, mediaID, title, streamURL, episodeID string) *Room {
+func (h *Hub) CreateRoom(hostID, mediaID, title, streamURL, episodeID string, headers map[string]string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -41,7 +41,7 @@ func (h *Hub) CreateRoom(hostID, mediaID, title, streamURL, episodeID string) *R
 		}
 	}
 
-	room := NewRoom(code, hostID, mediaID, title, streamURL, episodeID, func(roomID string) {
+	room := NewRoom(code, hostID, mediaID, title, streamURL, episodeID, headers, func(roomID string) {
 		h.DeleteRoom(roomID)
 	})
 

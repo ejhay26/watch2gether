@@ -107,7 +107,14 @@ func TestManagerWithMockServer(t *testing.T) {
 	if len(searchRes) == 0 {
 		t.Fatalf("Expected mock search result")
 	}
-	if searchRes[0].ID != "movie-mock-123" && searchRes[len(searchRes)-1].ID != "movie-mock-123" {
+	found := false
+	for _, it := range searchRes {
+		if it.ID == "movie-mock-123" {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Errorf("Expected movie-mock-123 in search results")
 	}
 }

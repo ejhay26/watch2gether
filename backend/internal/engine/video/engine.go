@@ -87,7 +87,7 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		mediaID = strings.Split(mediaID, "-s")[0]
 	}
 
-	// 1. Try pre-indexed archive films
+	// 1. Try pre-indexed curated public domain / classic films
 	if film, found := e.archiveProvider.Match(mediaID, title); found {
 		sources := film.Sources
 		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
@@ -99,8 +99,24 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		}, nil
 	}
 
-	// 2. Try dynamic search on Archive.org (matches full 1080p/720p feature presentations > 250MB)
+	// 2. For modern/commercial films, resolve real multi-source feature streams FIRST (FlixHQ/Vidmoly/VidSrc)
 	if title != "" {
+		res, err := e.featureProvider.ResolveFeatureStream(ctx, mediaID, title)
+		if err == nil && res != nil && len(res.Sources) > 0 {
+			sources := res.Sources
+			if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
+				sources = []model.Source{sources[1], sources[0]}
+			}
+			return &model.StreamResult{
+				Sources:   sources,
+				Subtitles: res.Subtitles,
+				Headers:   res.Headers,
+			}, nil
+		}
+	}
+
+	// 3. Try dynamic archive ONLY if explicit archive request or strictly verified feature film collection
+	if title != "" && (strings.HasPrefix(serverID, "archive-") || strings.HasPrefix(mediaID, "archive-")) {
 		film, err := e.archiveProvider.SearchDynamicArchive(ctx, mediaID, title, "")
 		if err == nil && film != nil && len(film.Sources) > 0 {
 			sources := film.Sources
@@ -112,12 +128,6 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 				Subtitles: film.Subtitles,
 			}, nil
 		}
-	}
-
-	// 3. Try TMDB feature provider (official trailers/feature previews for modern films)
-	res, err := e.featureProvider.ResolveFeatureStream(ctx, mediaID, title)
-	if err == nil && res != nil && len(res.Sources) > 0 {
-		return res, nil
 	}
 
 	// 4. Return clean error - zero fake fallback videos

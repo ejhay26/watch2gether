@@ -36,7 +36,8 @@ type CreateRoomRequest struct {
 	MediaID   string `json:"media_id"`
 	Title     string `json:"title"`
 	StreamURL string `json:"stream_url"`
-	EpisodeID string `json:"episode_id"`
+	EpisodeID string            `json:"episode_id"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 func (h *RoomHandler) RegisterRoutes(app fiber.Router) {
@@ -54,12 +55,13 @@ func (h *RoomHandler) RegisterRoutes(app fiber.Router) {
 			req.Title = "Watch Together Room"
 		}
 
-		room := h.hub.CreateRoom("", req.MediaID, req.Title, req.StreamURL, req.EpisodeID)
+		room := h.hub.CreateRoom("", req.MediaID, req.Title, req.StreamURL, req.EpisodeID, req.Headers)
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"room_id":    room.ID,
 			"title":      room.Title,
 			"media_id":   room.MediaID,
 			"stream_url": room.StreamURL,
+			"headers":    room.Headers,
 		})
 	})
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,7 +22,15 @@ import (
 
 func main() {
 	// Load environment variables
-	_ = godotenv.Load(".env")
+	_ = godotenv.Load(".env", "backend/.env", "../.env", "../../.env")
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		_ = godotenv.Load(
+			filepath.Join(exeDir, ".env"),
+			filepath.Join(exeDir, "..", ".env"),
+			filepath.Join(exeDir, "..", "..", ".env"),
+		)
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -105,7 +114,27 @@ func main() {
 
 		historyHandler := api.NewHistoryHandler(db, jwtSecret)
 		historyHandler.RegisterRoutes(app)
+	} else {
+		app.All("/api/v1/auth/*", func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error":   "Database connection offline. Please check backend DATABASE_URL configuration.",
+				"status":  503,
+				"service": "watch2gether-backend",
+			})
+		})
 	}
+
+	// App Version & In-App Update API
+	app.Get("/api/v1/app/version", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"version":        "1.0.1",
+			"build_number":   2,
+			"release_notes":  "Real movie stream resolutions (eliminated gameplays), persistent room stream rejoining, improved mobile touch responsiveness, and smarter party playback synchronization.",
+			"mandatory":      false,
+			"android_apk":    "https://github.com/ejhay26/watch2gether/releases/latest/download/app-release.apk",
+			"windows_zip":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watchtogether-windows.zip",
+		})
+	})
 
 	// Root Route
 	app.Get("/", func(c *fiber.Ctx) error {

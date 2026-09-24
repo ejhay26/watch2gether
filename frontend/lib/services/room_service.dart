@@ -24,12 +24,46 @@ class RoomService extends ChangeNotifier {
   Function(double position)? onPauseReceived;
   Function(double position, int executeAtMs)? onSeekReceived;
   Function(String mediaId, String title, String streamUrl)? onMediaChangedReceived;
+  Function(String mediaId, String title, String streamUrl, String episodeId, Map<String, String>? headers)? onPartyPlayPrompt;
+  String? localActiveMediaId;
+
+  bool get isInParty => _isConnected && _currentRoomId != null;
 
   String? get currentRoomId => _currentRoomId;
   String? get username => _username;
   RoomStateData? get state => _state;
   bool get isConnected => _isConnected;
   bool get isHost => _state != null && _userId != null && _state!.hostId == _userId;
+
+
+  Future<String?> startParty({String? username, String? userId, String title = "Watch Party"}) async {
+    final uname = username ?? _username ?? "Host";
+    final uid = userId ?? _userId ?? "host_${DateTime.now().millisecondsSinceEpoch % 10000}";
+    final code = await ApiService().createRoom(title: title);
+    if (code != null) {
+      await connect(roomId: code, userId: uid, username: uname);
+      notifyListeners();
+    }
+    return code;
+  }
+
+  Future<bool> joinParty(String code, {String? username, String? userId}) async {
+    final cleanCode = code.toUpperCase().trim();
+    if (cleanCode.length != 6) return false;
+    final uname = username ?? _username ?? "Viewer";
+    final uid = userId ?? _userId ?? "user_${DateTime.now().millisecondsSinceEpoch % 10000}";
+    final room = await ApiService().getRoom(cleanCode);
+    if (room != null) {
+      await connect(roomId: cleanCode, userId: uid, username: uname);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  void leaveParty() {
+    disconnect();
+  }
 
   Future<void> connect({
     required String roomId,
@@ -154,12 +188,17 @@ class RoomService extends ChangeNotifier {
           final mediaId = jsonMap['media_id'] ?? '';
           final title = jsonMap['title'] ?? '';
           final streamUrl = jsonMap['stream_url'] ?? '';
+          final episodeId = jsonMap['episode_id'] ?? '';
+          final rawHeaders = jsonMap['headers'] as Map<String, dynamic>?;
+          final headers = rawHeaders?.map((k, v) => MapEntry(k, v.toString()));
+
           if (_state != null) {
             _state = _state!.copyWith(
               mediaId: mediaId,
               title: title,
               streamUrl: streamUrl,
-              episodeId: jsonMap['episode_id'] ?? '',
+              episodeId: episodeId,
+              headers: headers,
               playbackPosition: 0.0,
               isPlaying: false,
               lastUpdated: DateTime.now(),
@@ -167,6 +206,10 @@ class RoomService extends ChangeNotifier {
             notifyListeners();
           }
           onMediaChangedReceived?.call(mediaId, title, streamUrl);
+          // Only prompt user to join if they are NOT already actively watching this media in PlayerScreen
+          if (localActiveMediaId != mediaId && onMediaChangedReceived == null) {
+            onPartyPlayPrompt?.call(mediaId, title, streamUrl, episodeId, headers);
+          }
           break;
 
         case 'CHAT':
@@ -249,13 +292,14 @@ class RoomService extends ChangeNotifier {
     });
   }
 
-  void sendChangeMedia(String mediaId, String title, String streamUrl, String episodeId) {
+  void sendChangeMedia(String mediaId, String title, String streamUrl, String episodeId, {Map<String, String>? headers}) {
     _send({
       'type': 'CHANGE_MEDIA',
       'media_id': mediaId,
       'title': title,
       'stream_url': streamUrl,
       'episode_id': episodeId,
+      ...?headers != null ? {'headers': headers} : null,
     });
   }
 

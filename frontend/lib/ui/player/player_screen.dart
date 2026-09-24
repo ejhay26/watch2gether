@@ -30,6 +30,7 @@ class PlayerScreen extends StatefulWidget {
   final StreamResult? streamResult;
   final Player? existingPlayer;
   final VideoController? existingController;
+  final bool isPartySynced;
 
   const PlayerScreen({
     super.key,
@@ -42,6 +43,7 @@ class PlayerScreen extends StatefulWidget {
     this.streamResult,
     this.existingPlayer,
     this.existingController,
+    this.isPartySynced = true,
   });
 
   @override
@@ -66,6 +68,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamResult? _currentStreamResult;
   MediaItem? _details;
   bool _disposedForPiP = false;
+  late bool _isPartySynced;
+  bool _loadingRecommended = false;
 
   bool get _isAnime {
     if (widget.mediaId.startsWith('anime-')) return true;
@@ -134,6 +138,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
     }
 
+    final playback = Provider.of<PlaybackService>(context, listen: false);
+    if (playback.isFloating && playback.player != null) {
+      if (playback.streamUrl != widget.streamUrl) {
+        playback.stopFloating();
+      }
+    }
+
     // Register global hardware key listener (independent of widget focus)
     HardwareKeyboard.instance.addHandler(_handleGlobalKeyEvent);
 
@@ -146,6 +157,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openMedia(String url, {Map<String, String>? headers}) {
+    _player.stop();
     _player.open(Media(url, httpHeaders: headers));
   }
 
@@ -335,10 +347,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isChatOpen = true;
     }
 
-    // Handlers for incoming sync events
+    // Handlers for incoming sync events (respecting _isPartySynced)
     roomService.onRoomStateReceived = (roomState) {
-      if (!mounted) return;
-      // Synchronize join playtime immediately using the live dynamic room position
+      if (!mounted || !_isPartySynced) return;
       final currentPos = roomState.currentPosition;
       if (currentPos > 0) {
         final target = Duration(milliseconds: (currentPos * 1000).toInt());
@@ -352,11 +363,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     };
 
     roomService.onPlayReceived = (position, executeAtMs) {
+      if (!mounted || !_isPartySynced) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       final delay = executeAtMs - now;
       if (delay > 0) {
         Future.delayed(Duration(milliseconds: delay), () {
-          if (mounted) {
+          if (mounted && _isPartySynced) {
             _player.seek(Duration(milliseconds: (position * 1000).toInt()));
             _player.play();
           }
@@ -364,26 +376,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } else {
         _player.seek(Duration(milliseconds: (position * 1000).toInt()));
         _player.play();
-        _loadAvailableServers();
       }
     };
 
     roomService.onPauseReceived = (position) {
+      if (!mounted || !_isPartySynced) return;
       _player.seek(Duration(milliseconds: (position * 1000).toInt()));
       _player.pause();
     };
 
     roomService.onSeekReceived = (position, executeAtMs) {
+      if (!mounted || !_isPartySynced) return;
       _player.seek(Duration(milliseconds: (position * 1000).toInt()));
     };
 
     roomService.onMediaChangedReceived = (mediaId, title, streamUrl) {
       if (!mounted) return;
+      if (!_isPartySynced) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Party is now watching "$title".'),
+            backgroundColor: const Color(0xFF1E2235),
+            action: SnackBarAction(
+              label: 'SYNC',
+              textColor: AppColors.accent,
+              onPressed: () => _syncWithParty(),
+            ),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
       setState(() {
         _currentTitle = title;
         _currentStreamUrl = streamUrl;
       });
-      _player.open(Media(streamUrl));
+      roomService.localActiveMediaId = mediaId;
+      final headers = roomService.state?.headers;
+      _player.stop();
+      _player.open(Media(streamUrl, httpHeaders: headers));
     };
 
     // Continuous Sync Drift Guard: Checks every 4 seconds to correct drift > 2.5s
@@ -402,6 +433,68 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
     });
+  }
+
+  void _syncWithParty() {
+    final roomService = Provider.of<RoomService>(context, listen: false);
+    final room = roomService.state;
+    if (room == null || !roomService.isInParty) return;
+
+    setState(() {
+      _isPartySynced = true;
+    });
+
+    if (room.streamUrl.isNotEmpty && room.streamUrl != _currentStreamUrl) {
+      setState(() {
+        _currentTitle = room.title;
+        _currentStreamUrl = room.streamUrl;
+      });
+      roomService.localActiveMediaId = room.mediaId;
+      final headers = room.headers;
+      final media = Media(
+        room.streamUrl,
+        httpHeaders: (headers != null && headers.isNotEmpty) ? headers : null,
+      );
+      _player.open(media, play: room.isPlaying);
+    } else {
+      if (room.isPlaying != _player.state.playing) {
+        if (room.isPlaying) {
+          _player.play();
+        } else {
+          _player.pause();
+        }
+      }
+    }
+
+    if (room.currentPosition > 0) {
+      _player.seek(Duration(milliseconds: (room.currentPosition * 1000).round()));
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Synced with watch party playback', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        backgroundColor: Color(0xFF1E2235),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _togglePartySync() {
+    setState(() {
+      _isPartySynced = !_isPartySynced;
+    });
+
+    if (_isPartySynced) {
+      _syncWithParty();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Watching independently (Party playback unlinked)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          backgroundColor: Color(0xFF1E2235),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _switchSource(StreamSource source) {
@@ -673,20 +766,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    // Hand over active player to floating mini-player if playing
-    if (_player.state.playing && mounted) {
-      playbackService.startFloating(
-        activePlayer: _player,
-        activeController: _controller,
-        activeMediaId: widget.mediaId,
-        activeEpisodeId: _currentEpisodeId,
-        activeTitle: _currentTitle,
-        activeSubtitle: _currentSubtitle,
-        activeStreamUrl: _currentStreamUrl,
-        activeStreamResult: _currentStreamResult,
-      );
-      _disposedForPiP = true;
-    }
+    // Explicitly stop player so audio NEVER plays in background when leaving
+    _player.stop();
+    _player.dispose();
+    _disposedForPiP = false;
+    playbackService.stopFloating();
 
     if (mounted) Navigator.of(context).pop();
   }
@@ -698,7 +782,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _syncCheckTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleGlobalKeyEvent);
 
+    final roomService = Provider.of<RoomService>(context, listen: false);
+    roomService.localActiveMediaId = null;
+    roomService.onRoomStateReceived = null;
+    roomService.onPlayReceived = null;
+    roomService.onPauseReceived = null;
+    roomService.onSeekReceived = null;
+    roomService.onMediaChangedReceived = null;
+
     if (!_disposedForPiP) {
+      _player.stop();
       _player.dispose();
     }
     if (_isDesktop) {
@@ -804,36 +897,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
               final isPlaying = snapshotPlaying.data ?? _player.state.playing;
 
               return StreamBuilder<Duration>(
-                stream: _player.stream.position,
-                builder: (context, snapshotPos) {
-                  final position = snapshotPos.data ?? Duration.zero;
-                  final duration = _player.state.duration;
-                  final volume = _player.state.volume / 100.0;
+                stream: _player.stream.duration,
+                initialData: _player.state.duration,
+                builder: (context, snapshotDur) {
+                  final duration = snapshotDur.data ?? _player.state.duration;
 
-                  return DesktopHUD(
-                    isVisible: _controlsVisible,
-                    title: _currentTitle,
-                    subtitle: _currentSubtitle,
-                    isPlaying: isPlaying,
-                    position: position,
-                    duration: duration,
-                    volume: volume,
-                    isMuted: volume == 0.0,
-                    isFullscreen: _isFullscreen,
-                    isRoom: isRoomActive,
-                    roomCode: _currentRoomCode ?? roomService.currentRoomId,
-                    participantCount: roomService.state?.participants.length ?? 1,
-                    isChatOpen: _isChatOpen,
-                    hasEpisodes: _isSeries,
-                    isEpisodesOpen: _isEpisodesOpen,
-                    streamResult: _currentStreamResult,
-                    currentQuality: _currentQuality,
-                    currentAudioTrack: _currentAudioTrack,
-                    currentSubtitle: _currentSubtitleTrack,
-                    availableAudioTracks: _availableAudioTracks,
-                    availableSubtitles: _availableSubtitles,
-                    onPlayPause: _togglePlayPause,
-                    onSeek: _seek,
+                  return StreamBuilder<Duration>(
+                    stream: _player.stream.position,
+                    builder: (context, snapshotPos) {
+                      final position = snapshotPos.data ?? Duration.zero;
+                      final volume = _player.state.volume / 100.0;
+
+                      return DesktopHUD(
+                        isVisible: _controlsVisible,
+                        title: _currentTitle,
+                        subtitle: _currentSubtitle,
+                        isPlaying: isPlaying,
+                        position: position,
+                        duration: duration,
+                        volume: volume,
+                        isMuted: volume == 0.0,
+                        isFullscreen: _isFullscreen,
+                        isRoom: isRoomActive,
+                        roomCode: _currentRoomCode ?? roomService.currentRoomId,
+                        participantCount: roomService.state?.participants.length ?? 1,
+                        isPartySynced: _isPartySynced,
+                        onTogglePartySync: isRoomActive ? _togglePartySync : null,
+                        isChatOpen: _isChatOpen,
+                        hasEpisodes: _isSeries,
+                        isEpisodesOpen: _isEpisodesOpen,
+                        streamResult: _currentStreamResult,
+                        currentQuality: _currentQuality,
+                        currentAudioTrack: _currentAudioTrack,
+                        currentSubtitle: _currentSubtitleTrack,
+                        availableAudioTracks: _availableAudioTracks,
+                        availableSubtitles: _availableSubtitles,
+                        onPlayPause: _togglePlayPause,
+                        onSeek: _seek,
                     onVolumeChange: (val) {
                       _player.setVolume(val * 100.0);
                       _onUserInteraction();
@@ -869,6 +969,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     onSelectQuality: _switchSource,
                     onSelectAudioTrack: _switchAudioTrack,
                     onSelectSubtitle: _switchSubtitle,
+                      );
+                    },
                   );
                 },
               );
@@ -897,90 +999,171 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildRecommendedItemCard(MediaItem item) {
-    return InkWell(
-      onTap: () async {
-        try {
-          final servers = await ApiService().getServers(item.id);
-          if (servers.isNotEmpty) {
-            final srv = servers.first;
-            final streamRes = await ApiService().getSources(srv.id, title: item.title);
-            if (streamRes != null && streamRes.sources.isNotEmpty) {
-              setState(() {
-                _currentTitle = item.title;
-                _currentSubtitle = null;
-                _currentEpisodeId = null;
-                _currentStreamUrl = streamRes.sources.first.url;
-                _currentStreamResult = streamRes;
-              });
-              _openMedia(streamRes.sources.first.url, headers: streamRes.headers);
-              _player.play();
-            }
-          }
-        } catch (_) {}
-      },
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: 120,
-                height: 68,
-                color: AppColors.surfaceElevated,
-                child: item.poster.isNotEmpty
-                    ? Image.network(
-                        item.poster,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.movie_rounded, color: Colors.white24),
-                      )
-                    : const Icon(Icons.movie_rounded, color: Colors.white24),
-              ),
+  Future<void> _handleSelectRecommended(MediaItem item) async {
+    final roomService = Provider.of<RoomService>(context, listen: false);
+    bool playForParty = false;
+
+    if (roomService.isInParty) {
+      final shouldParty = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF161928),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
+          title: Text('Watch "${item.title}"', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: const Text(
+            'Would you like to play this for the entire party, or watch it independently?',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Watch Alone', style: TextStyle(color: Colors.white70)),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (item.year != null)
-                        Text(
-                          item.year!,
-                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
-                        ),
-                      if (item.year != null) const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceBorder,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: Text(
-                          item.quality ?? 'HD',
-                          style: const TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Play for Party', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
+        ),
+      );
+      if (shouldParty == null) return;
+      playForParty = shouldParty;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Loading "${item.title}"...'),
+        duration: const Duration(seconds: 2),
+        backgroundColor: const Color(0xFF1E2235),
+      ),
+    );
+
+    try {
+      final servers = await ApiService().getServers(item.id);
+      if (servers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No stream found for "${item.title}"')),
+          );
+        }
+        return;
+      }
+      final srv = servers.first;
+      final streamRes = await ApiService().getSources(srv.id, title: item.title);
+      if (streamRes == null || streamRes.sources.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Stream unavailable for "${item.title}"')),
+          );
+        }
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _currentTitle = item.title;
+        _currentSubtitle = null;
+        _currentEpisodeId = null;
+        _currentStreamUrl = streamRes.sources.first.url;
+        _currentStreamResult = streamRes;
+        _isPartySynced = playForParty;
+      });
+
+      roomService.localActiveMediaId = item.id;
+      _openMedia(streamRes.sources.first.url, headers: streamRes.headers);
+      _player.play();
+
+      if (playForParty) {
+        roomService.sendChangeMedia(
+          item.id,
+          item.title,
+          streamRes.sources.first.url,
+          item.id,
+          headers: streamRes.headers,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load stream: $e')),
+        );
+      }
+    }
+  }
+
+  Widget _buildRecommendedItemCard(MediaItem item) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _handleSelectRecommended(item),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: 120,
+                  height: 68,
+                  color: AppColors.surfaceElevated,
+                  child: item.poster.isNotEmpty
+                      ? Image.network(
+                          item.poster,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.movie_rounded, color: Colors.white24),
+                        )
+                      : const Icon(Icons.movie_rounded, color: Colors.white24),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        if (item.year != null)
+                          Text(
+                            item.year!,
+                            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+                          ),
+                        if (item.year != null) const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceBorder,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            item.quality ?? 'HD',
+                            style: const TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1399,8 +1582,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
 
-                // Quick Episodes row if series
-                if (_isSeries && _episodes.isNotEmpty) ...[
+                // Seasons & Episodes Grid (Inline below player - NO modal)
+                if (_isSeries) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
@@ -1408,42 +1591,83 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       children: [
                         const Text(
                           'Episodes',
-                          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                         ),
-                        TextButton(
-                          onPressed: () {
-                            showModalBottomSheet(
-                              context: context,
-                              backgroundColor: AppColors.surface,
-                              builder: (_) => _buildEpisodesDrawer(),
-                            );
-                          },
-                          child: const Text('View All', style: TextStyle(color: AppColors.accent)),
-                        ),
+                        if (_availableSeasons.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceElevated,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                value: _selectedSeason,
+                                dropdownColor: AppColors.surfaceElevated,
+                                icon: const Icon(Icons.arrow_drop_down, color: AppColors.accent),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                items: _availableSeasons.map((s) {
+                                  return DropdownMenuItem<int>(
+                                    value: s,
+                                    child: Text('Season $s'),
+                                  );
+                                }).toList(),
+                                onChanged: (val) {
+                                  if (val != null && val != _selectedSeason) {
+                                    setState(() => _selectedSeason = val);
+                                    _loadSeriesData();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
-                  SizedBox(
-                    height: 40,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _episodes.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (context, i) {
-                        final ep = _episodes[i];
-                        final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && i == 0);
-                        return ActionChip(
-                          label: Text('EP ${ep.number}'),
-                          backgroundColor: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
-                          labelStyle: TextStyle(
-                            color: isPlaying ? Colors.black : Colors.white,
-                            fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          onPressed: () => _selectEpisode(ep),
-                        );
-                      },
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _loadingEpisodes
+                        ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(color: AppColors.accent)))
+                        : _episodes.isEmpty
+                            ? const Padding(padding: EdgeInsets.all(12), child: Text('No episodes found.', style: TextStyle(color: AppColors.textSecondary)))
+                            : GridView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 5,
+                                  childAspectRatio: 1.3,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                ),
+                                itemCount: _episodes.length,
+                                itemBuilder: (ctx, idx) {
+                                  final ep = _episodes[idx];
+                                  final isPlaying = ep.id == _currentEpisodeId || (_currentEpisodeId == null && idx == 0);
+                                  return InkWell(
+                                    borderRadius: BorderRadius.circular(8),
+                                    onTap: () => _selectEpisode(ep),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: isPlaying ? AppColors.accent : AppColors.surfaceElevated,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: isPlaying ? AppColors.accent : Colors.white12,
+                                        ),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        'EP ${ep.number}',
+                                        style: TextStyle(
+                                          color: isPlaying ? Colors.black : Colors.white,
+                                          fontWeight: isPlaying ? FontWeight.bold : FontWeight.w600,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                   ),
                 ],
 
@@ -1475,7 +1699,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final roomService = Provider.of<RoomService>(context);
     final isRoomActive = roomService.isConnected || (_currentRoomCode != null && _currentRoomCode!.isNotEmpty);
 
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        _player.stop();
+        Provider.of<PlaybackService>(context, listen: false).stopFloating();
+      },
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: _isFullscreen
           ? _buildFullscreenLayout(roomService, isRoomActive)
@@ -1487,6 +1717,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 return _buildYouTubeMobileLayout(roomService, isRoomActive);
               },
             ),
+    ),
     );
   }
 }

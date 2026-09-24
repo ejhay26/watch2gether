@@ -14,6 +14,7 @@ type Room struct {
 	Title            string
 	StreamURL        string
 	EpisodeID        string
+	Headers          map[string]string
 	PlaybackPosition float64
 	IsPlaying        bool
 	LastUpdated      time.Time
@@ -24,7 +25,7 @@ type Room struct {
 	onEmpty    func(roomID string)
 }
 
-func NewRoom(id, hostID, mediaID, title, streamURL, episodeID string, onEmpty func(roomID string)) *Room {
+func NewRoom(id, hostID, mediaID, title, streamURL, episodeID string, headers map[string]string, onEmpty func(roomID string)) *Room {
 	return &Room{
 		ID:               id,
 		HostID:           hostID,
@@ -32,6 +33,7 @@ func NewRoom(id, hostID, mediaID, title, streamURL, episodeID string, onEmpty fu
 		Title:            title,
 		StreamURL:        streamURL,
 		EpisodeID:        episodeID,
+		Headers:          headers,
 		PlaybackPosition: 0,
 		IsPlaying:        false,
 		LastUpdated:      time.Now().UTC(),
@@ -161,6 +163,7 @@ func (r *Room) HandleMessage(sender *Client, msg WSMessage) {
 		r.Title = msg.Title
 		r.StreamURL = msg.StreamURL
 		r.EpisodeID = msg.EpisodeID
+		r.Headers = msg.Headers
 		r.PlaybackPosition = 0
 		r.IsPlaying = false
 		r.LastUpdated = time.Now().UTC()
@@ -172,6 +175,7 @@ func (r *Room) HandleMessage(sender *Client, msg WSMessage) {
 			Title:     msg.Title,
 			StreamURL: msg.StreamURL,
 			EpisodeID: msg.EpisodeID,
+			Headers:   msg.Headers,
 		}, nil)
 
 	case EventChat:

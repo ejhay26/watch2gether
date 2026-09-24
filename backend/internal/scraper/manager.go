@@ -2,6 +2,8 @@ package scraper
 
 import (
 	"context"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +75,113 @@ func (m *Manager) GetAnimeEngine() *anime.AnimeEngine {
 	return m.animeEngine
 }
 
+
+var yearRegex = regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+
+func rankSearchResults(rawQuery string, items []MediaItem) []MediaItem {
+	queryLower := strings.ToLower(strings.TrimSpace(rawQuery))
+	if queryLower == "" || len(items) == 0 {
+		return items
+	}
+
+	yearMatch := yearRegex.FindString(queryLower)
+	cleanQuery := queryLower
+	if yearMatch != "" {
+		cleanQuery = strings.TrimSpace(yearRegex.ReplaceAllString(cleanQuery, ""))
+	}
+
+	rawWords := strings.Fields(cleanQuery)
+	stopWords := map[string]bool{"a": true, "an": true, "the": true, "of": true, "in": true, "on": true, "and": true, "to": true}
+	var significantWords []string
+	for _, w := range rawWords {
+		if len(rawWords) > 1 && stopWords[w] {
+			continue
+		}
+		significantWords = append(significantWords, w)
+	}
+	if len(significantWords) == 0 {
+		significantWords = rawWords
+	}
+
+	isExplicitAnimeQuery := strings.Contains(queryLower, "anime") || strings.Contains(queryLower, "manga")
+
+	type scoredItem struct {
+		item  MediaItem
+		score float64
+	}
+
+	scored := make([]scoredItem, len(items))
+	for i, it := range items {
+		titleLower := strings.ToLower(strings.TrimSpace(it.Title))
+		score := 0.0
+
+		// 1. Exact title match
+		if titleLower == queryLower || (cleanQuery != "" && titleLower == cleanQuery) {
+			score += 1000
+		} else if cleanQuery != "" && strings.HasPrefix(titleLower, cleanQuery) {
+			score += 500
+		} else if cleanQuery != "" && strings.Contains(titleLower, cleanQuery) {
+			score += 300
+		}
+
+		// 2. Word matching
+		matchedWords := 0
+		for _, w := range significantWords {
+			if strings.Contains(titleLower, w) {
+				matchedWords++
+				score += 80
+			} else {
+				score -= 60
+			}
+		}
+		if len(significantWords) > 0 && matchedWords == len(significantWords) {
+			score += 200 // All query words found in title
+		}
+
+		// 3. Year match
+		if yearMatch != "" {
+			if it.Year == yearMatch {
+				score += 600 // Massive boost for exact year match
+			} else if it.Year != "" {
+				score -= 150
+			}
+		}
+
+		// 4. Source / Anime tuning
+		isAnime := strings.HasPrefix(it.ID, "anime-")
+		if !isExplicitAnimeQuery {
+			if !isAnime {
+				score += 150 // Boost catalog / mainstream films
+			} else {
+				// Penalize anime if it does not match all significant words
+				if matchedWords < len(significantWords) {
+					score -= 300
+				}
+			}
+		}
+
+		// 5. Popularity/Overview bonus
+		if it.Poster != "" {
+			score += 20
+		}
+		if it.Overview != "" {
+			score += 10
+		}
+
+		scored[i] = scoredItem{item: it, score: score}
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	result := make([]MediaItem, len(scored))
+	for i, s := range scored {
+		result[i] = s.item
+	}
+	return result
+}
+
 func (m *Manager) Search(query string) ([]MediaItem, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -132,7 +241,22 @@ func (m *Manager) Search(query string) ([]MediaItem, error) {
 		}()
 	}
 
+		// 4. Search FlixHQ if configured
+	if m.flixhq != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			flixRes, err := m.flixhq.Search(query)
+			if err == nil {
+				for _, it := range flixRes {
+					addItem(it)
+				}
+			}
+		}()
+	}
+
 	// Wait with grace period
+
 	doneCh := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -144,7 +268,7 @@ func (m *Manager) Search(query string) ([]MediaItem, error) {
 	case <-time.After(5 * time.Second):
 	}
 
-	return combined, nil
+	return rankSearchResults(query, combined), nil
 }
 
 func (m *Manager) GetTrending() ([]MediaItem, error) {
@@ -155,39 +279,42 @@ func (m *Manager) GetTrending() ([]MediaItem, error) {
 	var mu sync.Mutex
 
 	seen := make(map[string]bool)
-	var combined []MediaItem
+	var tmdbItems []MediaItem
+	var animeItems []MediaItem
+	var demoItems []MediaItem
 
-	addItem := func(it MediaItem) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !seen[it.ID] {
-			seen[it.ID] = true
-			combined = append(combined, it)
-		}
-	}
-
-	// 1. TMDB Trending
+	// 1. TMDB Trending (Mainstream Movies & Series)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		results, err := m.catalogEngine.GetTrending(ctx)
 		if err == nil {
+			mu.Lock()
 			for _, it := range results {
-				addItem(it)
+				if !seen[it.ID] {
+					seen[it.ID] = true
+					tmdbItems = append(tmdbItems, it)
+				}
 			}
+			mu.Unlock()
 		}
 	}()
 
-	// 2. HiAnime Trending (Popular Anime & Animation)
+	// 2. HiAnime Trending (Anime & Animation)
 	if m.animeEngine != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			results, err := m.animeEngine.GetTrending(ctx)
 			if err == nil {
+				mu.Lock()
 				for _, it := range results {
-					addItem(it)
+					if !seen[it.ID] {
+						seen[it.ID] = true
+						animeItems = append(animeItems, it)
+					}
 				}
+				mu.Unlock()
 			}
 		}()
 	}
@@ -199,9 +326,52 @@ func (m *Manager) GetTrending() ([]MediaItem, error) {
 			defer wg.Done()
 			demoRes, err := m.demo.GetTrending()
 			if err == nil {
+				mu.Lock()
 				for _, it := range demoRes {
-					addItem(it)
+					if !seen[it.ID] {
+						seen[it.ID] = true
+						demoItems = append(demoItems, it)
+					}
 				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+	// 4. FlixHQ trending if configured
+	if m.flixhq != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			flixRes, err := m.flixhq.GetTrending()
+			if err == nil {
+				mu.Lock()
+				for _, it := range flixRes {
+					if !seen[it.ID] {
+						seen[it.ID] = true
+						tmdbItems = append(tmdbItems, it)
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+		// 4. FlixHQ trending if configured
+	if m.flixhq != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			flixRes, err := m.flixhq.GetTrending()
+			if err == nil {
+				mu.Lock()
+				for _, it := range flixRes {
+					if !seen[it.ID] {
+						seen[it.ID] = true
+						tmdbItems = append(tmdbItems, it)
+					}
+				}
+				mu.Unlock()
 			}
 		}()
 	}
@@ -216,6 +386,12 @@ func (m *Manager) GetTrending() ([]MediaItem, error) {
 	case <-doneCh:
 	case <-time.After(5 * time.Second):
 	}
+
+	// Interleave or order: Show top TMDB catalog items first, followed by anime and demo
+	var combined []MediaItem
+	combined = append(combined, tmdbItems...)
+	combined = append(combined, animeItems...)
+	combined = append(combined, demoItems...)
 
 	return combined, nil
 }

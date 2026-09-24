@@ -1,3 +1,6 @@
+import 'package:provider/provider.dart';
+import '../../services/room_service.dart';
+import '../../services/playback_service.dart';
 import 'package:flutter/material.dart';
 import '../../constants/theme.dart';
 import '../../models/media_item.dart';
@@ -124,13 +127,130 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
       }
       final streamUrl = streamRes.sources[0].url;
 
+      if (!mounted) return;
+      // Stop previous floating player immediately to prevent audio overlap
+      final playback = Provider.of<PlaybackService>(context, listen: false);
+      if (playback.isFloating) {
+        playback.stopFloating();
+      }
+
+      final roomService = Provider.of<RoomService>(context, listen: false);
       String? roomCode;
-      if (createRoom) {
+      bool isPartySynced = true;
+
+      if (roomService.isInParty) {
+        final partyState = roomService.state;
+        final isPartyWatchingThis = partyState != null && partyState.mediaId == widget.item.id;
+        final isPartyWatchingOther = partyState != null && partyState.mediaId.isNotEmpty && partyState.mediaId != widget.item.id;
+
+        if (isPartyWatchingThis) {
+          final posSeconds = partyState.currentPosition.toInt();
+          final mins = posSeconds ~/ 60;
+          final secs = posSeconds % 60;
+          final timeStr = "$mins:${secs.toString().padLeft(2, '0')}";
+
+          final shouldSync = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF161928),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
+              title: const Text("Party Watching Live", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              content: Text(
+                'Your party is currently watching "${widget.item.title}" at $timeStr. Would you like to synchronize with them, or watch from the beginning independently?',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text("Watch Independently", style: TextStyle(color: Colors.white70)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text("Sync with Party", style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+          if (shouldSync == null) {
+            setState(() => _isLaunchingPlayer = false);
+            return;
+          }
+          if (shouldSync) {
+            roomCode = roomService.currentRoomId;
+            isPartySynced = true;
+          } else {
+            roomCode = null;
+            isPartySynced = false;
+          }
+        } else if (isPartyWatchingOther) {
+          final shouldSwitch = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF161928),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
+              title: const Text("Party Active", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              content: Text(
+                'Your party is currently watching "${partyState.title}". Would you like to switch the party to "${widget.item.title}", or watch independently?',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text("Watch Alone", style: TextStyle(color: Colors.white70)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text("Switch for Party", style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+          if (shouldSwitch == null) {
+            setState(() => _isLaunchingPlayer = false);
+            return;
+          }
+          if (shouldSwitch) {
+            roomCode = roomService.currentRoomId;
+            isPartySynced = true;
+            roomService.sendChangeMedia(
+              widget.item.id,
+              widget.item.title,
+              streamUrl,
+              epId,
+              headers: streamRes.headers,
+            );
+          } else {
+            roomCode = null;
+            isPartySynced = false;
+          }
+        } else {
+          roomCode = roomService.currentRoomId;
+          isPartySynced = true;
+          roomService.sendChangeMedia(
+            widget.item.id,
+            widget.item.title,
+            streamUrl,
+            epId,
+            headers: streamRes.headers,
+          );
+        }
+      } else if (createRoom) {
         roomCode = await _api.createRoom(
           mediaId: widget.item.id,
           title: widget.item.title,
           streamUrl: streamUrl,
           episodeId: epId,
+          headers: streamRes.headers,
         );
       }
 
@@ -147,6 +267,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
             episodeId: epId,
             initialRoomCode: roomCode,
             streamResult: streamRes,
+            isPartySynced: isPartySynced,
           ),
         ),
       );

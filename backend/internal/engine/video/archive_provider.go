@@ -594,11 +594,12 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 	}
 
 	var queries []string
+	collectionFilter := "AND collection:(feature_films OR classic_tv OR moviesandfilms OR SciFi_Horror OR Comedy_Films OR Film_Noir OR silent_films)"
 	if year != "" && len(year) == 4 {
-		queries = append(queries, fmt.Sprintf(`title:("%s") AND year:%s AND mediatype:movies`, cleanTitle, year))
-		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies`, cleanTitle))
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND year:%s AND mediatype:movies %s`, cleanTitle, year, collectionFilter))
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies %s`, cleanTitle, collectionFilter))
 	} else {
-		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies`, cleanTitle))
+		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies %s`, cleanTitle, collectionFilter))
 	}
 
 	badKeywords := []string{
@@ -606,6 +607,8 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 		"vidcast", "acceptance", "vlog", "reaction", "episode", "promo", "mineola", "lego",
 		"walkthrough", "playthrough", "let's play", "longplay", "speedrun", "mod", "cutscenes",
 		"game", "pc gameplay", "ps4", "ps5", "xbox", "nintendo", "boss fight", "ending scene",
+		"gdc", "gdceu", "twitch", "conference", "tas", "gcn", "psx", "ps1", "ps2", "ps3",
+		"segment", "weapons run", "panel", "interview", "presentation", "speed_runs",
 	}
 
 	titleWords := strings.Fields(strings.ToLower(cleanTitle))

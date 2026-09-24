@@ -187,10 +187,11 @@ class ApiService {
 
   // --- Watch Room Endpoints ---
   Future<String?> createRoom({
-    required String mediaId,
-    required String title,
-    required String streamUrl,
+    String mediaId = '',
+    String title = 'Watch Party',
+    String streamUrl = '',
     String episodeId = '',
+    Map<String, String>? headers,
   }) async {
     try {
       final res = await _dio.post('/api/v1/rooms', data: {
@@ -198,6 +199,7 @@ class ApiService {
         'title': title,
         'stream_url': streamUrl,
         'episode_id': episodeId,
+        ...?headers != null ? {'headers': headers} : null,
       });
       return res.data['room_id'] as String?;
     } catch (e) {
@@ -235,6 +237,16 @@ class ApiService {
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  // --- App Version & In-App Update ---
+  Future<Map<String, dynamic>?> checkAppVersion() async {
+    try {
+      final res = await _dio.get('/api/v1/app/version');
+      return res.data as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
     }
   }
 }

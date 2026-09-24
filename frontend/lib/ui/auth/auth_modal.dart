@@ -96,12 +96,14 @@ class _AuthModalState extends State<AuthModal> with SingleTickerProviderStateMix
     final email = _regEmailController.text.trim();
     final password = _regPasswordController.text;
 
-    if (username.length < 3) {
-      setState(() => _errorMessage = 'Username must be at least 3 characters');
+    final userRegex = RegExp(r'^[a-zA-Z0-9_]{3,20}$');
+    if (!userRegex.hasMatch(username)) {
+      setState(() => _errorMessage = 'Username must be 3-20 alphanumeric characters or underscores');
       return;
     }
-    if (!email.contains('@') || !email.contains('.')) {
-      setState(() => _errorMessage = 'Please enter a valid email address');
+    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    if (!emailRegex.hasMatch(email)) {
+      setState(() => _errorMessage = 'Please enter a valid email address (e.g. name@example.com)');
       return;
     }
     if (password.length < 6) {
@@ -143,6 +145,14 @@ class _AuthModalState extends State<AuthModal> with SingleTickerProviderStateMix
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboardType,
+      textInputAction: TextInputAction.go,
+      onSubmitted: (_) {
+        if (_tabController.index == 0) {
+          _handleLogin();
+        } else {
+          _handleRegister();
+        }
+      },
       style: const TextStyle(color: Colors.white, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
