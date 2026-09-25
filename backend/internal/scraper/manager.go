@@ -1,10 +1,11 @@
-package scraper
+﻿package scraper
 
 import (
 	"context"
 	"regexp"
 	"sort"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -472,7 +473,7 @@ func (m *Manager) GetStream(serverId string) (*StreamResult, error) {
 
 func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResult, error) {
 	if strings.HasPrefix(serverId, "anime-") {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 		return m.animeEngine.GetStream(ctx, serverId)
 	}
@@ -480,7 +481,7 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 		return m.demo.GetStream(serverId)
 	}
 	if strings.HasPrefix(serverId, "tmdb-") || strings.HasPrefix(serverId, "movie-") || strings.Contains(serverId, "-srv-") || strings.HasPrefix(serverId, "archive-") || title != "" || !strings.Contains(serverId, "flix") {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 
 		stream, err := m.videoEngine.GetStream(ctx, serverId, title)
@@ -491,12 +492,37 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 			}
 			return stream, nil
 		}
+
+		// Fallback to anime engine if this might be an anime title or series
+		if m.animeEngine != nil && title != "" {
+			animeItems, aErr := m.animeEngine.Search(ctx, title)
+			if aErr == nil && len(animeItems) > 0 {
+				eps, epErr := m.animeEngine.GetEpisodes(ctx, animeItems[0].ID)
+				if epErr == nil && len(eps) > 0 {
+					targetEpIdx := 0
+					reEpNum := regexp.MustCompile(`(?i)[eE][pP]?[-_]?(\d+)`)
+					if matches := reEpNum.FindStringSubmatch(serverId); len(matches) > 1 {
+						if n, err := strconv.Atoi(matches[1]); err == nil && n >= 1 && n <= len(eps) {
+							targetEpIdx = n - 1
+						}
+					}
+					targetEp := eps[targetEpIdx]
+					servers, sErr := m.animeEngine.GetServers(ctx, targetEp.ID)
+					if sErr == nil && len(servers) > 0 {
+						animeStream, stErr := m.animeEngine.GetStream(ctx, servers[0].ID)
+						if stErr == nil && animeStream != nil && len(animeStream.Sources) > 0 {
+							return animeStream, nil
+						}
+					}
+				}
+			}
+		}
 	}
 	stream, err := m.flixhq.GetStream(serverId)
 	if err == nil && stream != nil && len(stream.Sources) > 0 {
 		return stream, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	return m.videoEngine.GetStream(ctx, serverId, title)
 }

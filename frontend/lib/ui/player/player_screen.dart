@@ -19,12 +19,14 @@ import 'desktop_hud.dart';
 import 'episodes_drawer.dart';
 import 'mobile_gestures.dart';
 import 'room_chat_drawer.dart';
+import '../components/app_toast.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String title;
   final String? subtitle;
   final String streamUrl;
   final String mediaId;
+  final String? poster;
   final String? episodeId;
   final String? initialRoomCode;
   final StreamResult? streamResult;
@@ -38,6 +40,7 @@ class PlayerScreen extends StatefulWidget {
     this.subtitle,
     required this.streamUrl,
     required this.mediaId,
+    this.poster,
     this.episodeId,
     this.initialRoomCode,
     this.streamResult,
@@ -68,8 +71,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamResult? _currentStreamResult;
   MediaItem? _details;
   bool _disposedForPiP = false;
-  late bool _isPartySynced;
-  bool _loadingRecommended = false;
+  bool _isPartySynced = true;
 
   bool get _isAnime {
     if (widget.mediaId.startsWith('anime-')) return true;
@@ -112,6 +114,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentEpisodeId = widget.episodeId;
     _currentRoomCode = widget.initialRoomCode;
     _currentStreamResult = widget.streamResult;
+    _isPartySynced = widget.isPartySynced;
 
     if (widget.existingPlayer != null && widget.existingController != null) {
       _player = widget.existingPlayer!;
@@ -156,7 +159,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _loadAvailableServers();
   }
 
+  bool _isPlayableMediaUrl(String url) {
+    if (url.trim().isEmpty) return false;
+    final clean = url.trim().toLowerCase();
+    if (clean.contains('.m3u8') || clean.contains('.mp4') || clean.contains('/hls/')) {
+      return true;
+    }
+    if (clean.endsWith('.html') || clean.endsWith('.htm') || clean.contains('/embed/') || clean.contains('player.php') || clean.contains('iframe')) {
+      return false;
+    }
+    return true;
+  }
+
   void _openMedia(String url, {Map<String, String>? headers}) {
+    if (!_isPlayableMediaUrl(url)) {
+      if (mounted) {
+        AppToast.show(
+          context,
+          'Direct video stream is unavailable for this mirror. Please select another source.',
+          type: ToastType.warning,
+        );
+      }
+      return;
+    }
     _player.stop();
     _player.open(Media(url, httpHeaders: headers));
   }
@@ -287,13 +312,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _selectEpisode(Episode ep) async {
     if (_currentEpisodeId == ep.id) return;
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Loading ${ep.title.isNotEmpty ? ep.title : "Episode ${ep.number}"}...'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: AppColors.surfaceElevated,
-      ),
+    AppToast.show(
+      context,
+      'Loading ${ep.title.isNotEmpty ? ep.title : "Episode ${ep.number}"}...',
+      type: ToastType.info,
+      duration: const Duration(seconds: 2),
     );
 
     try {
@@ -324,11 +347,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to play episode: ${e.toString()}'),
-            backgroundColor: Colors.redAccent,
-          ),
+        AppToast.show(
+          context,
+          'Failed to play episode: ${e.toString()}',
+          type: ToastType.error,
         );
       }
     }
@@ -395,8 +417,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!_isPartySynced) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Party is now watching "$title".'),
-            backgroundColor: const Color(0xFF1E2235),
+            elevation: 8,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: AppColors.accent.withValues(alpha: 0.4), width: 1.2),
+            ),
+            backgroundColor: const Color(0xFF141622),
+            content: Text(
+              'Party is now watching "$title".',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13.5),
+            ),
             action: SnackBarAction(
               label: 'SYNC',
               textColor: AppColors.accent,
@@ -470,12 +501,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _player.seek(Duration(milliseconds: (room.currentPosition * 1000).round()));
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Synced with watch party playback', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        backgroundColor: Color(0xFF1E2235),
-        duration: Duration(seconds: 2),
-      ),
+    AppToast.show(
+      context,
+      'Synced with watch party playback',
+      type: ToastType.success,
+      duration: const Duration(seconds: 2),
     );
   }
 
@@ -487,12 +517,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_isPartySynced) {
       _syncWithParty();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Watching independently (Party playback unlinked)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-          backgroundColor: Color(0xFF1E2235),
-          duration: Duration(seconds: 2),
-        ),
+      AppToast.show(
+        context,
+        'Watching independently (Party playback unlinked)',
+        type: ToastType.warning,
+        duration: const Duration(seconds: 2),
       );
     }
   }
@@ -606,12 +635,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ]);
         await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       } else {
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-        ]);
-        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        await _restoreMobileOrientation();
       }
     }
+  }
+
+  Future<void> _restoreMobileOrientation() async {
+    if (_isDesktop) return;
+    try {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await Future.delayed(const Duration(milliseconds: 100));
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } catch (_) {}
   }
 
   Future<void> _createRoomOnDemand() async {
@@ -638,8 +681,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
             userId: auth.userId ?? 'user_${DateTime.now().millisecondsSinceEpoch}',
             username: auth.username ?? 'Host',
           );
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Watch Room created! Code: $roomCode')),
+          AppToast.show(
+            context,
+            'Watch Room created! Code: $roomCode',
+            type: ToastType.success,
           );
         }
       },
@@ -753,7 +798,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _handleBack() async {
-    final playbackService = Provider.of<PlaybackService>(context, listen: false);
+    if (_isFullscreen) {
+      await _toggleFullscreen();
+      return;
+    }
 
     if (_isDesktop) {
       final isFull = await windowManager.isFullScreen();
@@ -766,11 +814,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    // Explicitly stop player so audio NEVER plays in background when leaving
-    _player.stop();
-    _player.dispose();
-    _disposedForPiP = false;
-    playbackService.stopFloating();
+    // Hand off active playback seamlessly to floating mini-player
+    final playbackService = Provider.of<PlaybackService>(context, listen: false);
+    _disposedForPiP = true;
+    playbackService.startFloating(
+      activePlayer: _player,
+      activeController: _controller,
+      activeMediaId: widget.mediaId,
+      activeEpisodeId: _currentEpisodeId,
+      activeTitle: _currentTitle,
+      activeSubtitle: _currentSubtitle,
+      activeStreamUrl: _currentStreamUrl,
+      activeStreamResult: _currentStreamResult,
+    );
+
+    if (!_isDesktop) {
+      await _restoreMobileOrientation();
+    }
 
     if (mounted) Navigator.of(context).pop();
   }
@@ -802,11 +862,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       });
     } else {
-      // Restore mobile orientations
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      _restoreMobileOrientation();
     }
     super.dispose();
   }
@@ -873,16 +929,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
-                if (_isBuffering)
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const CircularProgressIndicator(
-                      color: AppColors.accent,
-                      strokeWidth: 3,
+                if (_isBuffering && !_controlsVisible)
+                  Center(
+                    child: Container(
+                      width: 64,
+                      height: 64,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                      ),
+                      child: const CircularProgressIndicator(
+                        color: AppColors.accent,
+                        strokeWidth: 3.5,
+                      ),
                     ),
                   ),
               ],
@@ -913,6 +974,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         title: _currentTitle,
                         subtitle: _currentSubtitle,
                         isPlaying: isPlaying,
+                        isBuffering: _isBuffering,
                         position: position,
                         duration: duration,
                         volume: volume,
@@ -1035,20 +1097,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
       playForParty = shouldParty;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Loading "${item.title}"...'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: const Color(0xFF1E2235),
-      ),
+    AppToast.show(
+      context,
+      'Loading "${item.title}"...',
+      type: ToastType.info,
+      duration: const Duration(seconds: 2),
     );
 
     try {
       final servers = await ApiService().getServers(item.id);
       if (servers.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No stream found for "${item.title}"')),
+          AppToast.show(
+            context,
+            'No stream found for "${item.title}"',
+            type: ToastType.warning,
           );
         }
         return;
@@ -1057,8 +1120,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final streamRes = await ApiService().getSources(srv.id, title: item.title);
       if (streamRes == null || streamRes.sources.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Stream unavailable for "${item.title}"')),
+          AppToast.show(
+            context,
+            'Stream unavailable for "${item.title}"',
+            type: ToastType.warning,
           );
         }
         return;
@@ -1089,8 +1154,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load stream: $e')),
+        AppToast.show(
+          context,
+          'Failed to load stream: $e',
+          type: ToastType.error,
         );
       }
     }
@@ -1700,10 +1767,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final isRoomActive = roomService.isConnected || (_currentRoomCode != null && _currentRoomCode!.isNotEmpty);
 
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
-        _player.stop();
-        Provider.of<PlaybackService>(context, listen: false).stopFloating();
+      canPop: !_isFullscreen,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop && _isFullscreen) {
+          await _toggleFullscreen();
+          return;
+        }
+        if (didPop && !_disposedForPiP) {
+          final playbackService = Provider.of<PlaybackService>(context, listen: false);
+          _disposedForPiP = true;
+          playbackService.startFloating(
+            activePlayer: _player,
+            activeController: _controller,
+            activeMediaId: widget.mediaId,
+            activeEpisodeId: _currentEpisodeId,
+            activeTitle: _currentTitle,
+            activeSubtitle: _currentSubtitle,
+            activeStreamUrl: _currentStreamUrl,
+            activeStreamResult: _currentStreamResult,
+          );
+          await _restoreMobileOrientation();
+        }
       },
       child: Scaffold(
       backgroundColor: Colors.black,

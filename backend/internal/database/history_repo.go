@@ -15,12 +15,13 @@ func (db *DB) SaveHistory(ctx context.Context, h *WatchHistory) error {
 	h.UpdatedAt = time.Now().UTC()
 
 	query := `
-		INSERT INTO watch_history (id, user_id, media_id, title, poster, episode_id, timestamp_seconds, duration_seconds, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO watch_history (id, user_id, media_id, title, poster, episode_id, timestamp_seconds, duration_seconds, is_watched, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (user_id, media_id, episode_id)
 		DO UPDATE SET
 			timestamp_seconds = EXCLUDED.timestamp_seconds,
 			duration_seconds = EXCLUDED.duration_seconds,
+			is_watched = EXCLUDED.is_watched,
 			updated_at = EXCLUDED.updated_at
 	`
 
@@ -33,6 +34,7 @@ func (db *DB) SaveHistory(ctx context.Context, h *WatchHistory) error {
 		h.EpisodeID,
 		h.TimestampSeconds,
 		h.DurationSeconds,
+		h.IsWatched,
 		h.UpdatedAt,
 	)
 	if err != nil {
@@ -44,11 +46,11 @@ func (db *DB) SaveHistory(ctx context.Context, h *WatchHistory) error {
 
 func (db *DB) GetHistory(ctx context.Context, userID string) ([]WatchHistory, error) {
 	query := `
-		SELECT id, user_id, media_id, title, poster, episode_id, timestamp_seconds, duration_seconds, updated_at
+		SELECT id, user_id, media_id, title, poster, episode_id, timestamp_seconds, duration_seconds, is_watched, updated_at
 		FROM watch_history
 		WHERE user_id = $1
 		ORDER BY updated_at DESC
-		LIMIT 50
+		LIMIT 100
 	`
 
 	rows, err := db.Pool.Query(ctx, query, userID)
@@ -70,6 +72,7 @@ func (db *DB) GetHistory(ctx context.Context, userID string) ([]WatchHistory, er
 			&episodeID,
 			&item.TimestampSeconds,
 			&item.DurationSeconds,
+			&item.IsWatched,
 			&item.UpdatedAt,
 		)
 		if err != nil {
@@ -85,10 +88,25 @@ func (db *DB) GetHistory(ctx context.Context, userID string) ([]WatchHistory, er
 }
 
 func (db *DB) DeleteHistory(ctx context.Context, userID, mediaID, episodeID string) error {
-	query := `
-		DELETE FROM watch_history
-		WHERE user_id = $1 AND media_id = $2 AND episode_id = $3
-	`
-	_, err := db.Pool.Exec(ctx, query, userID, mediaID, episodeID)
+	var err error
+	if episodeID == "" {
+		query := `
+			DELETE FROM watch_history
+			WHERE user_id = $1 AND media_id = $2
+		`
+		_, err = db.Pool.Exec(ctx, query, userID, mediaID)
+	} else {
+		query := `
+			DELETE FROM watch_history
+			WHERE user_id = $1 AND media_id = $2 AND episode_id = $3
+		`
+		_, err = db.Pool.Exec(ctx, query, userID, mediaID, episodeID)
+	}
+	return err
+}
+
+func (db *DB) ClearAllHistory(ctx context.Context, userID string) error {
+	query := `DELETE FROM watch_history WHERE user_id = $1`
+	_, err := db.Pool.Exec(ctx, query, userID)
 	return err
 }

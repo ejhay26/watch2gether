@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"context"
@@ -114,6 +114,9 @@ func main() {
 
 		historyHandler := api.NewHistoryHandler(db, jwtSecret)
 		historyHandler.RegisterRoutes(app)
+
+		settingsHandler := api.NewSettingsHandler(db, jwtSecret)
+		settingsHandler.RegisterRoutes(app)
 	} else {
 		app.All("/api/v1/auth/*", func(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -127,8 +130,8 @@ func main() {
 	// App Version & In-App Update API
 	app.Get("/api/v1/app/version", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"version":        "1.0.1",
-			"build_number":   2,
+			"version": "1.0.2",
+			"build_number": 3,
 			"release_notes":  "Real movie stream resolutions (eliminated gameplays), persistent room stream rejoining, improved mobile touch responsiveness, and smarter party playback synchronization.",
 			"mandatory":      false,
 			"android_apk":    "https://github.com/ejhay26/watch2gether/releases/latest/download/app-release.apk",

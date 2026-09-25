@@ -1,3 +1,4 @@
+import '../components/app_toast.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ class DesktopHUD extends StatefulWidget {
   final bool isPartySynced;
   final VoidCallback? onTogglePartySync;
   final bool isVisible;
+  final bool isBuffering;
   final String title;
   final String? subtitle;
   final bool isPlaying;
@@ -41,6 +43,7 @@ class DesktopHUD extends StatefulWidget {
   final ValueChanged<StreamSource>? onSelectQuality;
   final ValueChanged<String>? onSelectAudioTrack;
   final ValueChanged<String>? onSelectSubtitle;
+  final VoidCallback? onBackgroundTap;
 
   const DesktopHUD({
     super.key,
@@ -59,6 +62,7 @@ class DesktopHUD extends StatefulWidget {
     required this.isChatOpen,
     this.hasEpisodes = false,
     this.isEpisodesOpen = false,
+    this.isBuffering = false,
     this.streamResult,
     this.currentQuality = 'Auto',
     this.currentAudioTrack = 'Default',
@@ -79,6 +83,7 @@ class DesktopHUD extends StatefulWidget {
     this.onSelectSubtitle,
     this.isPartySynced = true,
     this.onTogglePartySync,
+    this.onBackgroundTap,
   });
 
   @override
@@ -324,6 +329,7 @@ class _DesktopHUDState extends State<DesktopHUD> {
     final onSelectQuality = widget.onSelectQuality;
     final onSelectAudioTrack = widget.onSelectAudioTrack;
     final onSelectSubtitle = widget.onSelectSubtitle;
+    final onBackgroundTap = widget.onBackgroundTap;
     final isMobilePlatform = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = isMobilePlatform || screenWidth < 650;
@@ -347,12 +353,72 @@ class _DesktopHUDState extends State<DesktopHUD> {
               stops: const [0.0, 0.22, 0.70, 1.0],
             ),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
+              // Gesture Background (Tapping hides/shows HUD or toggles playback)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () {
+                    if (onBackgroundTap != null) {
+                      onBackgroundTap();
+                    } else {
+                      onPlayPause();
+                    }
+                  },
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+
+              // Concentric Center Play/Pause & Buffering Spinner (Exact Screen & Viewport Center)
+              Center(
+                child: widget.isBuffering
+                    ? Container(
+                        width: 64,
+                        height: 64,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                        ),
+                        child: const CircularProgressIndicator(
+                          color: AppColors.accent,
+                          strokeWidth: 3.5,
+                        ),
+                      )
+                    : Material(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: onPlayPause,
+                          child: Container(
+                            width: 64,
+                            height: 64,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                            ),
+                            child: Icon(
+                              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                              size: 38,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+
               // Top Bar
-              SafeArea(
-                top: isFullscreen,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  top: isFullscreen,
                 bottom: false,
                 left: isFullscreen,
                 right: isFullscreen,
@@ -409,12 +475,7 @@ class _DesktopHUDState extends State<DesktopHUD> {
                             onTap: () {
                               if (roomCode != null) {
                                 Clipboard.setData(ClipboardData(text: roomCode!));
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Room code copied: $roomCode'),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
+                                AppToast.show(context, 'Room code copied: $roomCode', type: ToastType.success, duration: const Duration(seconds: 2));
                               }
                             },
                             borderRadius: BorderRadius.circular(16),
@@ -468,12 +529,7 @@ class _DesktopHUDState extends State<DesktopHUD> {
                                   InkWell(
                                     onTap: () {
                                       Clipboard.setData(ClipboardData(text: roomCode!));
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('Room code copied: $roomCode'),
-                                          duration: const Duration(seconds: 2),
-                                        ),
-                                      );
+                                      AppToast.show(context, 'Room code copied: $roomCode', type: ToastType.success, duration: const Duration(seconds: 2));
                                     },
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -573,10 +629,15 @@ class _DesktopHUDState extends State<DesktopHUD> {
                   ),
                 ),
               ),
+            ),
 
               // Bottom Bar (Progress Bar + Controls)
-              SafeArea(
-                top: false,
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  top: false,
                 bottom: isFullscreen,
                 left: isFullscreen,
                 right: isFullscreen,
@@ -898,6 +959,7 @@ class _DesktopHUDState extends State<DesktopHUD> {
                   ),
                 ),
               ),
+            ),
             ],
           ),
         ),

@@ -1,4 +1,7 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
+import '../models/history_model.dart';
+import '../models/settings_model.dart';
+import '../models/media_item.dart';
 import '../models/media_item.dart';
 import '../models/room_models.dart';
 import '../models/user_model.dart';
@@ -216,6 +219,18 @@ class ApiService {
     }
   }
 
+  // --- Watch History Endpoints ---
+  Future<List<WatchHistoryItem>> getWatchHistory() async {
+    if (_authToken == null) return [];
+    try {
+      final res = await _dio.get('/api/v1/history');
+      final list = (res.data['history'] as List<dynamic>?) ?? [];
+      return list.map((e) => WatchHistoryItem.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
   Future<bool> saveWatchHistory({
     required String mediaId,
     required String title,
@@ -223,6 +238,7 @@ class ApiService {
     String episodeId = '',
     required int timestampSeconds,
     required int durationSeconds,
+    bool? isWatched,
   }) async {
     if (_authToken == null) return false;
     try {
@@ -233,7 +249,59 @@ class ApiService {
         'episode_id': episodeId,
         'timestamp_seconds': timestampSeconds,
         'duration_seconds': durationSeconds,
+        if (isWatched != null) 'is_watched': isWatched,
       });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> deleteWatchHistory({
+    required String mediaId,
+    String? episodeId,
+  }) async {
+    if (_authToken == null) return false;
+    try {
+      final q = <String, dynamic>{'media_id': mediaId};
+      if (episodeId != null && episodeId.isNotEmpty) {
+        q['episode_id'] = episodeId;
+      }
+      await _dio.delete('/api/v1/history', queryParameters: q);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> clearAllWatchHistory() async {
+    if (_authToken == null) return false;
+    try {
+      await _dio.delete('/api/v1/history/all');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // --- Settings Endpoints ---
+  Future<UserSettingsModel?> getUserSettings() async {
+    if (_authToken == null) return null;
+    try {
+      final res = await _dio.get('/api/v1/settings');
+      if (res.data['settings'] != null) {
+        return UserSettingsModel.fromJson(res.data['settings'] as Map<String, dynamic>);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<bool> saveUserSettings(UserSettingsModel settings) async {
+    if (_authToken == null) return false;
+    try {
+      await _dio.post('/api/v1/settings', data: settings.toJson());
       return true;
     } catch (e) {
       return false;

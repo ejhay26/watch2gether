@@ -82,3 +82,14 @@ func TestVideoEngineDynamicServersAndStream(t *testing.T) {
 		t.Errorf("Night of the Living Dead incorrectly fell back to Tears of Steel!")
 	}
 }
+
+func TestTaleOfTales(t *testing.T) {
+	ve := NewVideoEngine(nil)
+	stream, err := ve.GetStream(context.Background(), "tmdb-movie-314405-srv-master", "Tale of Tales")
+	if err != nil {
+		t.Fatalf("Failed to get stream: %v", err)
+	}
+	for i, s := range stream.Sources {
+		t.Logf("Source %d: %s (%s, is_m3u8: %v)", i, s.Quality, s.URL, s.IsM3U8)
+	}
+}

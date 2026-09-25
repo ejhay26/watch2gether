@@ -1,0 +1,184 @@
+name: Multiplatform Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release Tag Name (e.g. v1.0.3)"
+        required: false
+        default: "v1.0.3"
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: "stable"
+          cache: true
+
+      - name: Determine Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Install Dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Build Android Release APK
+        working-directory: frontend
+        run: flutter build apk --release
+
+      - name: Rename and Prepare APK
+        run: |
+          mkdir -p release-artifacts
+          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-${{ steps.vars.outputs.tag }}.apk"
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: release-artifacts/*.apk
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows Desktop Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: "stable"
+          cache: true
+
+      - name: Determine Tag
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Enable Windows Desktop in Flutter
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Build Windows Desktop Release
+        working-directory: frontend
+        run: flutter build windows --release
+
+      - name: Archive Windows Release Bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-artifacts
+          $zipPath = "release-artifacts/watch2gether-windows-${{ steps.vars.outputs.tag }}.zip"
+          Compress-Archive -Path "frontend/build/windows/x64/runner/Release/*" -DestinationPath $zipPath -Force
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release-artifacts/*.zip
+          retention-days: 7
+
+  publish-release:
+    name: Publish Multiplatform GitHub Release
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release
+          path: release-files
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-files
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes Body with Direct Download Links
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          APK_NAME="watch2gether-android-${TAG}.apk"
+          ZIP_NAME="watch2gether-windows-${TAG}.zip"
+
+          cat <<EOF > release_notes.md
+          # 🚀 Watch2Gether Release ${TAG}
+
+          ### 📥 Direct Downloads
+          Click below to download directly without searching through dropdown assets:
+
+          - 📱 [**Download Android APK (Direct)**](https://github.com/${REPO}/releases/download/${TAG}/${APK_NAME})
+          - 💻 [**Download Windows Desktop (Direct Zip)**](https://github.com/${REPO}/releases/download/${TAG}/${ZIP_NAME})
+
+          ---
+
+          ### ✨ Key Features & Improvements
+          - **Floating Mini-Player**: Persistent picture-in-picture mini-player appears seamlessly when returning to Home, Search, History, or Settings with uninterruted playback.
+          - **Mobile Fullscreen Auto-Rotation**: Fixed horizontal lock bug. Exiting fullscreen on mobile immediately restores vertical portrait mode and re-enables native auto-rotation and rotation buttons.
+          - **Concentric Audio/Video HUD**: Coaxial center alignment for the Play/Pause button and buffering progress indicator with zero visual shift or jitter.
+          - **Full Anime Stream Support**: Restored direct HLS 1080p playback for all anime mirrors including HiAnime and Frieren: Beyond Journey's End.
+          - **High-Contrast Toast Notifications**: Replaced low-contrast toast messages with luminous, readable toast pills with clear visual indicators.
+          EOF
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Watch2Gether Release ${{ steps.vars.outputs.tag }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

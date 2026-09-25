@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ejhay26/watch2gether/backend/internal/model"
@@ -17,6 +18,7 @@ import (
 type TMDBFeatureProvider struct {
 	apiKeys []string
 	client  *http.Client
+	cache   sync.Map
 }
 
 func NewTMDBFeatureProvider(apiKeys []string) *TMDBFeatureProvider {
@@ -30,7 +32,7 @@ func NewTMDBFeatureProvider(apiKeys []string) *TMDBFeatureProvider {
 	return &TMDBFeatureProvider{
 		apiKeys: apiKeys,
 		client: &http.Client{
-			Timeout: 8 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 	}
 }
@@ -39,9 +41,14 @@ type tmdbSearchResponse struct {
 	Results []struct {
 		ID          int    `json:"id"`
 		Title       string `json:"title"`
+		Name        string `json:"name"`
 		ReleaseDate string `json:"release_date"`
 		Overview    string `json:"overview"`
 	} `json:"results"`
+}
+
+type tmdbExternalIDsResponse struct {
+	IMDBID string `json:"imdb_id"`
 }
 
 type tmdbVideosResponse struct {
@@ -52,180 +59,276 @@ type tmdbVideosResponse struct {
 	} `json:"results"`
 }
 
+func cleanTitleForSearchVariants(raw string) []string {
+	// 1. Replace '&' with 'and'
+	s1 := strings.ReplaceAll(raw, "&", "and")
+	s1 = cleanSymbols(s1)
+
+	// 2. Replace '&' with space
+	s2 := strings.ReplaceAll(raw, "&", " ")
+	s2 = cleanSymbols(s2)
+
+	// 3. Raw cleaned
+	s3 := cleanSymbols(raw)
+
+	seen := make(map[string]bool)
+	var list []string
+	for _, s := range []string{s1, s2, s3} {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != "" && !seen[trimmed] {
+			seen[trimmed] = true
+			list = append(list, trimmed)
+		}
+	}
+	return list
+}
+
+func cleanSymbols(s string) string {
+	symbols := []string{":", "-", "'", "\"", ".", "!", "?", ",", "(", ")", "[", "]"}
+	for _, sym := range symbols {
+		s = strings.ReplaceAll(s, sym, " ")
+	}
+	words := strings.Fields(s)
+	return strings.Join(words, " ")
+}
+
 // ScrapeFlixHQ searches flixhq.ws and extracts multi-server streams (Vidmoly, VidSrc, etc.) and subtitles
 func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle string) *model.StreamResult {
-	// Clean query and encode spaces with %20 for flixhq.ws
-	q := strings.ReplaceAll(cleanTitle, " ", "%20")
-	searchURL := fmt.Sprintf("https://flixhq.ws/search/%s", q)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return nil
+	cacheKey := strings.ToLower(strings.TrimSpace(cleanTitle))
+	if cached, ok := p.cache.Load(cacheKey); ok {
+		if res, valid := cached.(*model.StreamResult); valid && res != nil {
+			return res
+		}
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := p.client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-	html := string(body)
-
-	reLink := regexp.MustCompile(`href=["'](https://flixhq\.ws/(?:movie|series)/[^"']+)["']`)
-	matches := reLink.FindAllStringSubmatch(html, -1)
-	if len(matches) == 0 {
-		return nil
+	variants := cleanTitleForSearchVariants(cleanTitle)
+	if len(variants) == 0 {
+		variants = []string{cleanTitle}
 	}
 
-	// Select best matching link
-	pageURL := matches[0][1]
 	lowerTitle := strings.ToLower(cleanTitle)
-	if strings.Contains(lowerTitle, "rush hour") {
-		// Prefer the classic 1998 Rush Hour if available
-		for _, m := range matches {
-			if strings.Contains(m[1], "83419") {
-				pageURL = m[1]
+	queryWords := strings.Fields(strings.ToLower(cleanSymbols(cleanTitle)))
+
+	var candidateLinks []string
+	seenLinks := make(map[string]bool)
+
+	for _, v := range variants {
+		encodedQ := strings.ReplaceAll(v, " ", "%20")
+		searchURLs := []string{
+			fmt.Sprintf("https://flixhq.ws/search/%s", encodedQ),
+			fmt.Sprintf("https://flixhq.ws/search/%s/", encodedQ),
+		}
+
+		for _, searchURL := range searchURLs {
+			req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+			if err != nil {
+				continue
+			}
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+			resp, err := p.client.Do(req)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				if resp != nil {
+					resp.Body.Close()
+				}
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				continue
+			}
+			html := string(body)
+
+			reLink := regexp.MustCompile(`href=["'](https://flixhq\.ws/(?:movie|series)/[^"']+)["']`)
+			matches := reLink.FindAllStringSubmatch(html, -1)
+			for _, m := range matches {
+				link := m[1]
+				if !strings.HasSuffix(link, "/") {
+					link += "/"
+				}
+				if !seenLinks[link] {
+					seenLinks[link] = true
+					candidateLinks = append(candidateLinks, link)
+				}
+			}
+			if len(candidateLinks) > 0 {
 				break
 			}
 		}
-	} else if strings.Contains(lowerTitle, "the fast and the furious") {
-		for _, m := range matches {
-			if strings.Contains(m[1], "88818") {
-				pageURL = m[1]
-				break
+		if len(candidateLinks) > 0 {
+			break
+		}
+	}
+
+	if len(candidateLinks) == 0 {
+		return nil
+	}
+
+	// Score candidates by match against title words
+	type scoredLink struct {
+		url   string
+		score int
+	}
+	var scored []scoredLink
+	for _, link := range candidateLinks {
+		slug := strings.ToLower(link)
+		score := 0
+		for _, w := range queryWords {
+			if len(w) > 1 && strings.Contains(slug, w) {
+				score += 50
+			}
+		}
+		if strings.Contains(lowerTitle, "rush hour") && strings.Contains(slug, "83419") {
+			score += 500
+		}
+		if strings.Contains(lowerTitle, "gretel") && strings.Contains(slug, "gretel-hansel-80591") {
+			score += 500
+		}
+		scored = append(scored, scoredLink{url: link, score: score})
+	}
+
+	// Sort highest score first
+	for i := 0; i < len(scored); i++ {
+		for j := i + 1; j < len(scored); j++ {
+			if scored[j].score > scored[i].score {
+				scored[i], scored[j] = scored[j], scored[i]
 			}
 		}
 	}
 
-	// Fetch detail page
-	reqPage, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
-	if err != nil {
-		return nil
-	}
-	reqPage.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	reqPage.Header.Set("Referer", "https://flixhq.ws/")
+	// Try each candidate link until one produces streams
+	for _, sl := range scored {
+		pageURL := sl.url
 
-	respPage, err := p.client.Do(reqPage)
-	if err != nil || respPage.StatusCode != http.StatusOK {
-		return nil
-	}
-	defer respPage.Body.Close()
+		reqPage, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+		if err != nil {
+			continue
+		}
+		reqPage.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+		reqPage.Header.Set("Referer", "https://flixhq.ws/")
 
-	bodyPage, _ := io.ReadAll(respPage.Body)
-	pageHTML := string(bodyPage)
+		respPage, err := p.client.Do(reqPage)
+		if err != nil || respPage.StatusCode != http.StatusOK {
+			if respPage != nil {
+				respPage.Body.Close()
+			}
+			continue
+		}
 
-	// Look for vds or vdkz AJAX token
-	reAjax := regexp.MustCompile(`/ajax/ajax\.php\?(?:vds|vdkz)=([a-zA-Z0-9+/=]+)`)
-	ajaxMatches := reAjax.FindStringSubmatch(pageHTML)
-	if len(ajaxMatches) < 2 {
-		return nil
-	}
+		bodyPage, _ := io.ReadAll(respPage.Body)
+		respPage.Body.Close()
+		pageHTML := string(bodyPage)
 
-	ajaxParam := ajaxMatches[0]
-	ajaxURL := fmt.Sprintf("https://flixhq.ws%s", ajaxParam)
+		reAjax := regexp.MustCompile(`/ajax/ajax\.php\?(?:vds|vdkz)=([a-zA-Z0-9+/=]+)`)
+		ajaxMatches := reAjax.FindStringSubmatch(pageHTML)
+		if len(ajaxMatches) < 2 {
+			continue
+		}
 
-	reqAjax, err := http.NewRequestWithContext(ctx, "GET", ajaxURL, nil)
-	if err != nil {
-		return nil
-	}
-	reqAjax.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	reqAjax.Header.Set("X-Requested-With", "XMLHttpRequest")
-	reqAjax.Header.Set("Referer", pageURL)
+		ajaxParam := ajaxMatches[0]
+		ajaxURL := fmt.Sprintf("https://flixhq.ws%s", ajaxParam)
 
-	respAjax, err := p.client.Do(reqAjax)
-	if err != nil || respAjax.StatusCode != http.StatusOK {
-		return nil
-	}
-	defer respAjax.Body.Close()
+		reqAjax, err := http.NewRequestWithContext(ctx, "GET", ajaxURL, nil)
+		if err != nil {
+			continue
+		}
+		reqAjax.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+		reqAjax.Header.Set("X-Requested-With", "XMLHttpRequest")
+		reqAjax.Header.Set("Referer", pageURL)
 
-	bodyAjax, _ := io.ReadAll(respAjax.Body)
-	ajaxHTML := string(bodyAjax)
+		respAjax, err := p.client.Do(reqAjax)
+		if err != nil || respAjax.StatusCode != http.StatusOK {
+			if respAjax != nil {
+				respAjax.Body.Close()
+			}
+			continue
+		}
 
-	// Extract servers
-	reSrv := regexp.MustCompile(`data-srv=["']([^"']+)["']\s*data-id=["']([^"']+)["']`)
-	srvMatches := reSrv.FindAllStringSubmatch(ajaxHTML, -1)
-	if len(srvMatches) == 0 {
-		return nil
-	}
+		bodyAjax, _ := io.ReadAll(respAjax.Body)
+		respAjax.Body.Close()
+		ajaxHTML := string(bodyAjax)
 
-	var sources []model.Source
-	var subtitles []model.Subtitle
+		reSrv := regexp.MustCompile(`data-srv=["']([^"']+)["']\s*data-id=["']([^"']+)["']`)
+		srvMatches := reSrv.FindAllStringSubmatch(ajaxHTML, -1)
+		if len(srvMatches) == 0 {
+			continue
+		}
 
-	for _, srv := range srvMatches {
-		srvName := srv[1]
-		srvLink := srv[2]
+		var sources []model.Source
+		var subtitles []model.Subtitle
 
-		if strings.Contains(srvLink, "subdrc.xyz") {
-			// Vidmoly / UpCloud direct player
-			reqSub, err := http.NewRequestWithContext(ctx, "GET", srvLink, nil)
-			if err == nil {
-				reqSub.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-				reqSub.Header.Set("Referer", "https://flixhq.ws/")
-				respSub, err := p.client.Do(reqSub)
+		for _, srv := range srvMatches {
+			srvName := srv[1]
+			srvLink := srv[2]
+
+			if strings.Contains(srvLink, "subdrc.xyz") {
+				reqSub, err := http.NewRequestWithContext(ctx, "GET", srvLink, nil)
 				if err == nil {
-					bodySub, _ := io.ReadAll(respSub.Body)
-					respSub.Body.Close()
-					subHTML := string(bodySub)
+					reqSub.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+					reqSub.Header.Set("Referer", "https://flixhq.ws/")
+					respSub, err := p.client.Do(reqSub)
+					if err == nil {
+						bodySub, _ := io.ReadAll(respSub.Body)
+						respSub.Body.Close()
+						subHTML := string(bodySub)
 
-					// Extract master m3u8 playlist
-					reM3U8 := regexp.MustCompile(`https?://[^\s"'<>]+\.m3u8[^\s"'<>]*`)
-					m3u8Matches := reM3U8.FindAllString(subHTML, -1)
-					if len(m3u8Matches) > 0 {
-						sources = append(sources, model.Source{
-							URL:     m3u8Matches[0],
-							Quality: fmt.Sprintf("1080p HD (Server 1 - %s)", srvName),
-							IsM3U8:  true,
-						})
-					}
-
-					// Extract VTT subtitles
-					reVTT := regexp.MustCompile(`https?://[^\s"'<>]+\.vtt[^\s"'<>]*`)
-					vttMatches := reVTT.FindAllString(subHTML, -1)
-					for _, vtt := range vttMatches {
-						lang := "English [CC]"
-						if strings.Contains(strings.ToLower(vtt), "romanian") {
-							lang = "Romanian"
-						} else if strings.Contains(strings.ToLower(vtt), "spanish") {
-							lang = "Spanish"
-						} else if strings.Contains(strings.ToLower(vtt), "french") {
-							lang = "French"
+						reM3U8 := regexp.MustCompile(`https?://[^\s"'<>]+\.m3u8[^\s"'<>]*`)
+						m3u8Matches := reM3U8.FindAllString(subHTML, -1)
+						if len(m3u8Matches) > 0 {
+							sources = append(sources, model.Source{
+								URL:     m3u8Matches[0],
+								Quality: fmt.Sprintf("1080p HD (Server 1 - %s)", srvName),
+								IsM3U8:  true,
+							})
 						}
-						subtitles = append(subtitles, model.Subtitle{
-							URL:  vtt,
-							Lang: lang,
-						})
+
+						reVTT := regexp.MustCompile(`https?://[^\s"'<>]+\.vtt[^\s"'<>]*`)
+						vttMatches := reVTT.FindAllString(subHTML, -1)
+						for _, vtt := range vttMatches {
+							lang := "English [CC]"
+							vttLower := strings.ToLower(vtt)
+							if strings.Contains(vttLower, "romanian") {
+								lang = "Romanian"
+							} else if strings.Contains(vttLower, "spanish") {
+								lang = "Spanish"
+							} else if strings.Contains(vttLower, "french") {
+								lang = "French"
+							} else if strings.Contains(vttLower, "german") {
+								lang = "German"
+							}
+							subtitles = append(subtitles, model.Subtitle{
+								URL:  vtt,
+								Lang: lang,
+							})
+						}
 					}
 				}
 			}
-		} else if strings.Contains(srvLink, "vidsrc") {
-			// VidSrc Gateway
-			sources = append(sources, model.Source{
-				URL:     srvLink,
-				Quality: "1080p Stream (Server 2 - VidSrc)",
-				IsM3U8:  false,
-			})
+		}
+
+		if len(sources) > 0 {
+			if len(subtitles) == 0 {
+				subtitles = append(subtitles, model.Subtitle{URL: "", Lang: "English (Auto)"})
+			}
+			res := &model.StreamResult{
+				Sources:   sources,
+				Subtitles: subtitles,
+			}
+			p.cache.Store(cacheKey, res)
+			return res
 		}
 	}
 
-	if len(sources) == 0 {
-		return nil
-	}
+	return nil
+}
 
-
-
-	if len(subtitles) == 0 {
-		subtitles = append(subtitles, model.Subtitle{URL: "", Lang: "English (Auto)"})
-	}
-
-	return &model.StreamResult{
-		Sources:   sources,
-		Subtitles: subtitles,
-	}
+// ResolveTMDBExternalStream finds TMDB ID & IMDB ID to provide multi-source movie/TV fallback streams
+func (p *TMDBFeatureProvider) ResolveTMDBExternalStream(ctx context.Context, mediaID string, title string) *model.StreamResult {
+	// Raw HTML webpage embeds (vidsrc, multiembed, 2embed) must NEVER be returned as video streams
+	// because media players (mpv / media_kit) attempt to decode them as video containers, causing
+	// Android Native SurfaceTexture to crash/freeze into a transparent-white unclickable overlay.
+	return nil
 }
 
 // CheckUnreleasedOrTrailer checks if a title is unreleased or has an official trailer preview
@@ -259,7 +362,6 @@ func (p *TMDBFeatureProvider) CheckUnreleasedOrTrailer(ctx context.Context, clea
 		}
 	}
 
-	// If future or if title contains brand new day / upcoming, get official video
 	videosURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d/videos?api_key=%s", movie.ID, apiKey)
 	reqV, err := http.NewRequestWithContext(ctx, "GET", videosURL, nil)
 	if err != nil {
@@ -279,7 +381,6 @@ func (p *TMDBFeatureProvider) CheckUnreleasedOrTrailer(ctx context.Context, clea
 				if !isFuture {
 					label = "Official Feature Trailer (1080p)"
 				}
-				// Serve high-speed trailer preview stream
 				return &model.StreamResult{
 					Sources: []model.Source{
 						{
@@ -305,25 +406,19 @@ func (p *TMDBFeatureProvider) ResolveFeatureStream(ctx context.Context, mediaID 
 		displayTitle = "Feature"
 	}
 
-	// 1. First check if it is an upcoming/unreleased movie (like Spider-Man: Brand New Day)
-	if strings.Contains(strings.ToLower(displayTitle), "brand new day") || strings.Contains(strings.ToLower(displayTitle), "teaser") {
-		trailer := p.CheckUnreleasedOrTrailer(ctx, displayTitle)
-		if trailer != nil {
-			return trailer, nil
-		}
-	}
-
-	// 2. Try FlixHQ Real Multi-Source Scraper (Vidmoly Master HLS + VidSrc Gateway)
+	// 1. Try FlixHQ Real Multi-Source Scraper (Vidmoly Master HLS)
 	flixRes := p.ScrapeFlixHQ(ctx, displayTitle)
 	if flixRes != nil && len(flixRes.Sources) > 0 {
 		return flixRes, nil
 	}
 
-	// 3. If unreleased or missing on FlixHQ, check TMDB official teaser
-	trailer := p.CheckUnreleasedOrTrailer(ctx, displayTitle)
-	if trailer != nil {
-		return trailer, nil
+	// 2. Fallback to direct external verified video stream
+	extRes := p.ResolveTMDBExternalStream(ctx, mediaID, displayTitle)
+	if extRes != nil && len(extRes.Sources) > 0 {
+		return extRes, nil
 	}
 
+	// Note: Never return raw YouTube webpage watch URLs as media streams.
+	// Media players cannot play HTML watch pages, which causes players to buffer eternally.
 	return nil, fmt.Errorf("no feature stream found for %s", displayTitle)
 }

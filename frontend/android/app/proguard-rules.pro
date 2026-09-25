@@ -9,6 +9,7 @@
 # MediaKit & Native Libs
 -keep class com.alexmercerind.media_kit.** { *; }
 -keep class com.alexmercerind.media_kit_video.** { *; }
+-keep class com.alexmercerind.mediakitandroidhelper.** { *; }
 
 # OkHttp, Retrofit, Coroutines
 -dontwarn okhttp3.**

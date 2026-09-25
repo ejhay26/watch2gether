@@ -23,6 +23,7 @@ func (h *HistoryHandler) RegisterRoutes(router fiber.Router) {
 	history.Post("/", h.SaveHistory)
 	history.Get("/", h.GetHistory)
 	history.Delete("/", h.DeleteHistory)
+	history.Delete("/all", h.ClearAllHistory)
 }
 
 type SaveHistoryRequest struct {
@@ -32,6 +33,7 @@ type SaveHistoryRequest struct {
 	EpisodeID        string `json:"episode_id"`
 	TimestampSeconds int    `json:"timestamp_seconds"`
 	DurationSeconds  int    `json:"duration_seconds"`
+	IsWatched        *bool  `json:"is_watched,omitempty"`
 }
 
 func (h *HistoryHandler) SaveHistory(c *fiber.Ctx) error {
@@ -50,6 +52,14 @@ func (h *HistoryHandler) SaveHistory(c *fiber.Ctx) error {
 		})
 	}
 
+	// Auto-detect watched if >90% duration, or if explicitly passed
+	isWatched := false
+	if req.IsWatched != nil {
+		isWatched = *req.IsWatched
+	} else if req.DurationSeconds > 0 && req.TimestampSeconds >= int(float64(req.DurationSeconds)*0.90) {
+		isWatched = true
+	}
+
 	item := &database.WatchHistory{
 		UserID:           userID,
 		MediaID:          req.MediaID,
@@ -58,6 +68,7 @@ func (h *HistoryHandler) SaveHistory(c *fiber.Ctx) error {
 		EpisodeID:        req.EpisodeID,
 		TimestampSeconds: req.TimestampSeconds,
 		DurationSeconds:  req.DurationSeconds,
+		IsWatched:        isWatched,
 	}
 
 	if err := h.db.SaveHistory(c.UserContext(), item); err != nil {
@@ -106,5 +117,19 @@ func (h *HistoryHandler) DeleteHistory(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"status": "deleted",
+	})
+}
+
+func (h *HistoryHandler) ClearAllHistory(c *fiber.Ctx) error {
+	userID, _ := c.Locals("userID").(string)
+
+	if err := h.db.ClearAllHistory(c.UserContext(), userID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"status": "cleared",
 	})
 }

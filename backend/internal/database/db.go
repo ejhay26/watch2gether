@@ -69,8 +69,21 @@ func (db *DB) Migrate(ctx context.Context) error {
 		episode_id TEXT,
 		timestamp_seconds INT NOT NULL DEFAULT 0,
 		duration_seconds INT NOT NULL DEFAULT 0,
+		is_watched BOOLEAN NOT NULL DEFAULT false,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 		CONSTRAINT unique_user_media_ep UNIQUE (user_id, media_id, episode_id)
+	);
+
+	ALTER TABLE watch_history ADD COLUMN IF NOT EXISTS is_watched BOOLEAN NOT NULL DEFAULT false;
+
+	CREATE TABLE IF NOT EXISTS user_settings (
+		user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		liquid_glass BOOLEAN NOT NULL DEFAULT true,
+		auto_sync_party BOOLEAN NOT NULL DEFAULT true,
+		hardware_accel BOOLEAN NOT NULL DEFAULT true,
+		subtitles_enabled BOOLEAN NOT NULL DEFAULT true,
+		default_quality TEXT NOT NULL DEFAULT 'Auto',
+		updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 	);
 
 	CREATE TABLE IF NOT EXISTS favorites (

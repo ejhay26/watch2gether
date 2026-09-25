@@ -9,7 +9,8 @@ import 'constants/theme.dart';
 import 'services/auth_service.dart';
 import 'services/room_service.dart';
 import 'services/playback_service.dart';
-import 'ui/home_screen.dart';
+import 'services/settings_service.dart';
+import 'ui/main_navigation_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +38,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => RoomService()),
         ChangeNotifierProvider(create: (_) => PlaybackService()),
+        ChangeNotifierProvider(create: (_) => SettingsService()),
       ],
       child: const Watch2GetherApp(),
     ),
@@ -52,7 +54,7 @@ class Watch2GetherApp extends StatelessWidget {
       title: 'WatchHub',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme(),
-      home: const HomeScreen(),
+      home: const MainNavigationShell(),
     );
   }
 }

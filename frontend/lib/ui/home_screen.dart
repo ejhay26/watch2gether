@@ -1,3 +1,4 @@
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/room_models.dart';
 import '../services/room_service.dart';
@@ -13,6 +14,7 @@ import '../models/media_item.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/playback_service.dart';
+import 'components/app_toast.dart';
 import 'auth/auth_modal.dart';
 import 'auth/profile_dialog.dart';
 import 'media/media_overview_modal.dart';
@@ -337,19 +339,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                   if (ctx.mounted) Navigator.of(ctx).pop();
                   if (code != null && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          "Party $code created",
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-                        ),
-                        backgroundColor: const Color(0xFF1E2235),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: const BorderSide(color: Color(0xFF334155)),
-                        ),
-                      ),
+                    AppToast.show(
+                      context,
+                      "Party $code created",
+                      type: ToastType.success,
                     );
                   }
                 },
@@ -556,13 +549,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  bool _isNewerVersion(String latest, String current) {
+    try {
+      final lParts = latest.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      final cParts = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      while (lParts.length < 3) lParts.add(0);
+      while (cParts.length < 3) cParts.add(0);
+      for (int i = 0; i < 3; i++) {
+        if (lParts[i] > cParts[i]) return true;
+        if (lParts[i] < cParts[i]) return false;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _checkForAppUpdate() async {
     try {
       final info = await _api.checkAppVersion();
       if (info == null || !mounted) return;
       final latestVersion = info['version'] as String? ?? '';
-      const currentVersion = "1.0.0";
-      if (latestVersion.isNotEmpty && latestVersion != currentVersion) {
+      
+      String currentVersion = "1.0.2";
+      try {
+        final pkgInfo = await PackageInfo.fromPlatform();
+        if (pkgInfo.version.isNotEmpty) {
+          currentVersion = pkgInfo.version;
+        }
+      } catch (_) {}
+
+      if (latestVersion.isNotEmpty && _isNewerVersion(latestVersion, currentVersion)) {
         final apkUrl = info['android_apk'] as String? ?? '';
         final releaseNotes = info['release_notes'] as String? ?? 'A new version of WatchTogether is available.';
         if (mounted) {
@@ -649,8 +666,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!success) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Party not found or expired")),
+        AppToast.show(
+          context,
+          "Party not found or expired",
+          type: ToastType.error,
         );
       }
       return;
@@ -689,19 +708,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Joined party $code",
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-          ),
-          backgroundColor: const Color(0xFF1E2235),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: const BorderSide(color: Color(0xFF334155)),
-          ),
-        ),
+      AppToast.show(
+        context,
+        "Joined party $code",
+        type: ToastType.success,
       );
     }
   }
@@ -743,8 +753,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   tooltip: "Copy Party Code",
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: code));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Party Code $code copied to clipboard!")),
+                    AppToast.show(
+                      context,
+                      "Party Code $code copied to clipboard!",
+                      type: ToastType.success,
                     );
                   },
                 ),
@@ -891,8 +903,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () {
                   roomService.leaveParty();
                   Navigator.of(ctx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Left watch party")),
+                  AppToast.show(
+                    context,
+                    "Left watch party",
+                    type: ToastType.info,
                   );
                 },
               ),
@@ -1170,6 +1184,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFloatingMiniPlayer(PlaybackService playbackService) {
+    // Hosted globally in MainNavigationShell across Home, Search, History & Settings
+    return const SizedBox.shrink();
     if (!playbackService.isFloating || playbackService.controller == null) {
       return const SizedBox.shrink();
     }
@@ -1179,7 +1195,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final double playerHeight = isNarrow ? 146.0 : 185.0;
 
     return Positioned(
-      bottom: isNarrow ? 16 : 24,
+      bottom: isNarrow ? 88 : 96,
       right: isNarrow ? 16 : 24,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 280),
@@ -1479,19 +1495,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          _selectedGenre != "All"
-                              ? "$_selectedGenre Titles"
-                              : _selectedFilter == 1
-                                  ? "Anime & Animation"
-                                  : _selectedFilter == 2
-                                      ? "Movies"
-                                      : _selectedFilter == 3
-                                          ? "TV Series"
-                                          : "Featured & Trending",
+                          _searchController.text.trim().isNotEmpty
+                              ? 'Results for "${_searchController.text.trim()}"'
+                              : _selectedGenre != "All"
+                                  ? "$_selectedGenre Titles"
+                                  : _selectedFilter == 1
+                                      ? "Anime & Animation"
+                                      : _selectedFilter == 2
+                                          ? "Movies"
+                                          : _selectedFilter == 3
+                                              ? "TV Series"
+                                              : "Featured & Trending",
                           style: const TextStyle(
-                            color: Colors.white70,
+                            color: Colors.white,
                             fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                            fontSize: 14,
+                            letterSpacing: -0.2,
                           ),
                         ),
                         OutlinedButton.icon(
@@ -1638,7 +1657,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     isMobile ? 12 : 20,
                                     10,
                                     isMobile ? 12 : 20,
-                                    playbackService.isFloating ? 200 : 20,
+                                    playbackService.isFloating ? 240 : 96,
                                   ),
                                   gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                                     maxCrossAxisExtent: isMobile ? 180 : 220,

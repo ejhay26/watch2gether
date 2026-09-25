@@ -1,10 +1,11 @@
-import 'package:provider/provider.dart';
+﻿import 'package:provider/provider.dart';
 import '../../services/room_service.dart';
 import '../../services/playback_service.dart';
 import 'package:flutter/material.dart';
 import '../../constants/theme.dart';
 import '../../models/media_item.dart';
 import '../../services/api_service.dart';
+import '../components/app_toast.dart';
 import '../auth/auth_guard.dart';
 import '../player/player_screen.dart';
 
@@ -116,11 +117,11 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
       if (streamRes == null || streamRes.sources.isEmpty) {
         if (mounted) {
           setState(() => _isLaunchingPlayer = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Unable to locate a stream for "${widget.item.title}". Please select another server or title.'),
-              backgroundColor: Colors.redAccent,
-            ),
+          AppToast.show(
+            context,
+            'Unable to locate a stream for "${widget.item.title}". Please select another server or title.',
+            type: ToastType.warning,
+            duration: const Duration(seconds: 4),
           );
         }
         return;
@@ -262,6 +263,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
           builder: (_) => PlayerScreen(
             title: widget.item.title,
             subtitle: episode != null ? 'S${episode.season}:E${episode.number} - ${episode.title}' : null,
+            poster: widget.item.poster,
             streamUrl: streamUrl,
             mediaId: widget.item.id,
             episodeId: epId,
@@ -274,8 +276,10 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLaunchingPlayer = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load video stream: $e')),
+        AppToast.show(
+          context,
+          'Failed to load video stream: $e',
+          type: ToastType.error,
         );
       }
     }
