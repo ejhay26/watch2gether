@@ -288,6 +288,14 @@ func (e *AnimeEngine) GetEpisodes(ctx context.Context, animeID string) ([]model.
 
 // GetServers resolves available Sub and Dub streaming servers for an episode ID
 func (e *AnimeEngine) GetServers(ctx context.Context, episodeID string) ([]model.Server, error) {
+	// If episodeID is an anime series ID (e.g. "anime-frieren-beyond-journeys-end-481"), resolve episode 1 first!
+	if !strings.HasPrefix(episodeID, "anime-ep-") && strings.HasPrefix(episodeID, "anime-") {
+		eps, err := e.GetEpisodes(ctx, episodeID)
+		if err == nil && len(eps) > 0 {
+			episodeID = eps[0].ID
+		}
+	}
+
 	parts := strings.Split(episodeID, "-")
 	rawEpID := parts[len(parts)-1]
 
@@ -313,28 +321,45 @@ func (e *AnimeEngine) GetServers(ctx context.Context, episodeID string) ([]model
 	reSrv := regexp.MustCompile(`data-type="([^"]*)"[\s\S]*?data-server-name="([^"]*)"[\s\S]*?data-hash="([^"]*)"`)
 	matches := reSrv.FindAllStringSubmatch(ajaxRes.HTML, -1)
 
-	var primary []model.Server
-	var secondary []model.Server
+	var subServers []model.Server
+	var dubServers []model.Server
+	var otherServers []model.Server
 
 	for _, m := range matches {
 		dtype := strings.ToUpper(m[1])
 		sname := m[2]
 		dhash := m[3]
 
+		displayName := fmt.Sprintf("[%s] %s (1080p HD)", dtype, sname)
+		if strings.EqualFold(sname, "ZokoAnime") {
+			if dtype == "DUB" {
+				displayName = "[DUB] English Dub (1080p HD)"
+			} else {
+				displayName = "[SUB] Japanese Audio (Multi-Sub 1080p)"
+			}
+		}
+
 		srv := model.Server{
-			ID:   fmt.Sprintf("anime-srv-%s-%s-%s", rawEpID, m[1], dhash),
-			Name: fmt.Sprintf("[%s] %s (1080p HD)", dtype, sname),
+			ID:   fmt.Sprintf("anime-srv-%s-%s-%s", rawEpID, strings.ToLower(m[1]), dhash),
+			Name: displayName,
 		}
 
 		if strings.EqualFold(sname, "ZokoAnime") {
-			primary = append(primary, srv)
+			if dtype == "DUB" {
+				dubServers = append(dubServers, srv)
+			} else {
+				subServers = append(subServers, srv)
+			}
 		} else {
-			secondary = append(secondary, srv)
+			otherServers = append(otherServers, srv)
 		}
 	}
 
-	// Always place ZokoAnime first since it decrypts directly via XOR
-	return append(primary, secondary...), nil
+	var ordered []model.Server
+	ordered = append(ordered, subServers...)
+	ordered = append(ordered, dubServers...)
+	ordered = append(ordered, otherServers...)
+	return ordered, nil
 }
 
 // GetStream decodes the ZokoAnime / HiAnime player and extracts direct master .m3u8 and subtitles
@@ -344,7 +369,8 @@ func (e *AnimeEngine) GetStream(ctx context.Context, serverID string) (*model.St
 		return nil, fmt.Errorf("invalid anime server ID")
 	}
 	rawEpID := parts[2]
-	dhash := parts[len(parts)-1]
+	dtype := strings.ToUpper(parts[3]) // "SUB" or "DUB"
+	dhash := strings.Join(parts[4:], "-")
 
 	embedBytes, err := base64.StdEncoding.DecodeString(dhash)
 	if err != nil {
@@ -352,20 +378,33 @@ func (e *AnimeEngine) GetStream(ctx context.Context, serverID string) (*model.St
 	}
 	embedURL := string(embedBytes)
 
-	// If the embed is not zokoanime, try to find the zokoanime server for this episode
+	// If the embed is not zokoanime, try to find the zokoanime server for this episode matching dtype
 	if !strings.Contains(embedURL, "zokoanime.video") {
 		servers, err := e.GetServers(ctx, fmt.Sprintf("anime-ep-tmp-%s", rawEpID))
 		if err == nil {
 			for _, s := range servers {
-				if strings.Contains(s.Name, "ZokoAnime") {
-					partsZoko := strings.Split(s.ID, "-")
-					zokoHash := partsZoko[len(partsZoko)-1]
-					if b, err := base64.StdEncoding.DecodeString(zokoHash); err == nil {
-						embedURL = string(b)
-						break
+				if strings.Contains(s.Name, "ZokoAnime") || strings.Contains(s.Name, "English Dub") || strings.Contains(s.Name, "Japanese Audio") {
+					if strings.Contains(strings.ToUpper(s.Name), dtype) || strings.Contains(s.ID, strings.ToLower(dtype)) {
+						partsZoko := strings.Split(s.ID, "-")
+						if len(partsZoko) >= 5 {
+							zokoHash := strings.Join(partsZoko[4:], "-")
+							if b, err := base64.StdEncoding.DecodeString(zokoHash); err == nil {
+								embedURL = string(b)
+								break
+							}
+						}
 					}
 				}
 			}
+		}
+	}
+
+	// Guarantee correct DUB vs SUB endpoint for zokoanime
+	if strings.Contains(embedURL, "zokoanime.video") {
+		if dtype == "DUB" && strings.HasSuffix(embedURL, "/sub") {
+			embedURL = strings.TrimSuffix(embedURL, "/sub") + "/dub"
+		} else if dtype == "SUB" && strings.HasSuffix(embedURL, "/dub") {
+			embedURL = strings.TrimSuffix(embedURL, "/dub") + "/sub"
 		}
 	}
 
@@ -414,18 +453,29 @@ func (e *AnimeEngine) GetStream(ctx context.Context, serverID string) (*model.St
 		return nil, fmt.Errorf("no stream URL in decrypted player config")
 	}
 
+	qualityLabel := "1080p Master HLS (HiAnime / Ani-Cli)"
+	if dtype == "DUB" {
+		qualityLabel = "1080p English Dub (Master HLS)"
+	} else {
+		qualityLabel = "1080p Japanese Sub (Master HLS)"
+	}
+
 	var sources []model.Source
 	sources = append(sources, model.Source{
 		URL:     cfg.Src,
-		Quality: "1080p Master HLS (HiAnime / Ani-Cli)",
+		Quality: qualityLabel,
 		IsM3U8:  true,
 	})
 
 	var subtitles []model.Subtitle
 	for _, s := range cfg.Subtitles {
+		label := s.Label
+		if label == "" {
+			label = s.Lang
+		}
 		subtitles = append(subtitles, model.Subtitle{
 			URL:  s.Src,
-			Lang: s.Label,
+			Lang: label,
 		})
 	}
 	if len(subtitles) == 0 {

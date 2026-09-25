@@ -33,6 +33,7 @@ class PlayerScreen extends StatefulWidget {
   final Player? existingPlayer;
   final VideoController? existingController;
   final bool isPartySynced;
+  final String? initialAudioTrack;
 
   const PlayerScreen({
     super.key,
@@ -47,6 +48,7 @@ class PlayerScreen extends StatefulWidget {
     this.existingPlayer,
     this.existingController,
     this.isPartySynced = true,
+    this.initialAudioTrack,
   });
 
   @override
@@ -115,6 +117,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentRoomCode = widget.initialRoomCode;
     _currentStreamResult = widget.streamResult;
     _isPartySynced = widget.isPartySynced;
+    if (widget.initialAudioTrack != null && widget.initialAudioTrack!.isNotEmpty) {
+      _currentAudioTrack = widget.initialAudioTrack!;
+    }
 
     if (widget.existingPlayer != null && widget.existingController != null) {
       _player = widget.existingPlayer!;
@@ -320,13 +325,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
 
     try {
-      final servers = await ApiService().getServers(ep.id);
+      final servers = await ApiService().getServers(ep.id, title: _currentTitle);
       if (servers.isEmpty) {
         throw Exception('No streaming servers available for this episode.');
       }
 
-      final srv = servers.first;
-      final streamRes = await ApiService().getSources(srv.id, title: ep.title);
+      final wantsDub = _currentAudioTrack.toUpperCase().contains('[DUB]');
+      Server srv = servers.first;
+      if (wantsDub) {
+        srv = servers.firstWhere(
+          (s) => s.name.toUpperCase().contains('[DUB]'),
+          orElse: () => servers.first,
+        );
+      } else {
+        srv = servers.firstWhere(
+          (s) => s.name.toUpperCase().contains('[SUB]'),
+          orElse: () => servers.first,
+        );
+      }
+
+      final streamRes = await ApiService().getSources(srv.id, title: _currentTitle);
       if (streamRes == null || streamRes.sources.isEmpty) {
         throw Exception('Episode stream could not be resolved.');
       }
@@ -552,6 +570,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
         } else if (!isDub && s.name.toUpperCase().contains('[SUB]')) {
           targetSrv = s;
           break;
+        }
+      }
+      if (targetSrv == null) {
+        final epId = _currentEpisodeId ?? widget.episodeId ?? widget.mediaId;
+        final freshSrvs = await ApiService().getServers(epId, title: _currentTitle);
+        for (final s in freshSrvs) {
+          if (isDub && s.name.toUpperCase().contains('[DUB]')) {
+            targetSrv = s;
+            break;
+          } else if (!isDub && s.name.toUpperCase().contains('[SUB]')) {
+            targetSrv = s;
+            break;
+          }
+        }
+        if (freshSrvs.isNotEmpty && mounted) {
+          setState(() => _availableServers = freshSrvs);
         }
       }
       if (targetSrv != null) {
@@ -826,6 +860,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       activeSubtitle: _currentSubtitle,
       activeStreamUrl: _currentStreamUrl,
       activeStreamResult: _currentStreamResult,
+      activeAudioTrack: _currentAudioTrack,
     );
 
     if (!_isDesktop) {
@@ -1785,6 +1820,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             activeSubtitle: _currentSubtitle,
             activeStreamUrl: _currentStreamUrl,
             activeStreamResult: _currentStreamResult,
+            activeAudioTrack: _currentAudioTrack,
           );
           await _restoreMobileOrientation();
         }

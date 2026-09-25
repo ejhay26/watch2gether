@@ -2,9 +2,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import '../../constants/theme.dart';
-import '../../services/settings_service.dart';
 import 'liquid_glass.dart';
 
 class FloatingNavBar extends StatelessWidget {
@@ -34,8 +32,6 @@ class FloatingNavBar extends StatelessWidget {
         ? const EdgeInsets.symmetric(horizontal: 2.5, vertical: 2.5)
         : const EdgeInsets.symmetric(horizontal: 3.5, vertical: 3.0);
 
-    final isLiquid = Provider.of<SettingsService>(context).liquidGlass;
-
     return Center(
       child: SizedBox(
         width: navWidth,
@@ -50,7 +46,6 @@ class FloatingNavBar extends StatelessWidget {
                 index: 0,
                 icon: Icons.home_rounded,
                 label: 'Home',
-                isLiquid: isLiquid,
                 iconSize: iconSize,
                 fontSize: fontSize,
                 itemSpacing: itemSpacing,
@@ -62,7 +57,6 @@ class FloatingNavBar extends StatelessWidget {
                 index: 1,
                 icon: Icons.history_rounded,
                 label: 'History',
-                isLiquid: isLiquid,
                 iconSize: iconSize,
                 fontSize: fontSize,
                 itemSpacing: itemSpacing,
@@ -74,7 +68,6 @@ class FloatingNavBar extends StatelessWidget {
                 index: 2,
                 icon: Icons.tune_rounded,
                 label: 'Settings',
-                isLiquid: isLiquid,
                 iconSize: iconSize,
                 fontSize: fontSize,
                 itemSpacing: itemSpacing,
@@ -93,7 +86,6 @@ class FloatingNavBar extends StatelessWidget {
     required int index,
     required IconData icon,
     required String label,
-    required bool isLiquid,
     required double iconSize,
     required double fontSize,
     required double itemSpacing,
@@ -116,18 +108,14 @@ class FloatingNavBar extends StatelessWidget {
             curve: Curves.easeOutCubic,
             margin: itemMargin,
             decoration: BoxDecoration(
-              // Symmetrical selected pill bubble
+              // Symmetrical selected pill bubble matching current theme
               color: isSelected
-                  ? (isLiquid
-                      ? Colors.white.withValues(alpha: 0.18)
-                      : AppColors.accent.withValues(alpha: 0.22))
+                  ? AppColors.accent.withValues(alpha: 0.22)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(pillRadius),
               border: Border.all(
                 color: isSelected
-                    ? (isLiquid
-                        ? Colors.white.withValues(alpha: 0.28)
-                        : AppColors.accent.withValues(alpha: 0.45))
+                    ? AppColors.accent.withValues(alpha: 0.45)
                     : Colors.transparent,
                 width: 0.8,
               ),

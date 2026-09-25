@@ -35,6 +35,7 @@ class FloatingMiniPlayer extends StatelessWidget {
           streamResult: streamResult,
           existingPlayer: player,
           existingController: controller,
+          initialAudioTrack: playbackService.audioTrack,
         ),
       ),
     );
@@ -49,9 +50,11 @@ class FloatingMiniPlayer extends StatelessWidget {
     final isNarrow = MediaQuery.of(context).size.width < 600;
     final double playerWidth = isNarrow ? 260.0 : 330.0;
     final double playerHeight = isNarrow ? 146.0 : 185.0;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final double bottomOffset = bottomPadding + (isNarrow ? 84.0 : 76.0);
 
     return Positioned(
-      bottom: isNarrow ? 80 : 86,
+      bottom: bottomOffset,
       right: isNarrow ? 14 : 20,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 280),

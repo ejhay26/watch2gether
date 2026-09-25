@@ -2,6 +2,7 @@ package anime
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -33,13 +34,31 @@ func TestAnimeSearchAndStream(t *testing.T) {
 		t.Fatalf("GetServers failed: %v", err)
 	}
 	t.Logf("Found %d servers", len(servers))
-	if len(servers) > 0 {
-		t.Logf("Server 0: ID=%s, Name=%s", servers[0].ID, servers[0].Name)
-		stream, err := ane.GetStream(ctx, servers[0].ID)
+	for _, s := range servers {
+		t.Logf("Testing server: ID=%s, Name=%s", s.ID, s.Name)
+		stream, err := ane.GetStream(ctx, s.ID)
 		if err != nil {
-			t.Logf("GetStream failed: %v", err)
+			t.Errorf("GetStream failed for %s: %v", s.Name, err)
 		} else {
-			t.Logf("GetStream SUCCESS! Sources=%d, Subtitles=%d", len(stream.Sources), len(stream.Subtitles))
+			t.Logf("GetStream SUCCESS for %s! Quality=%s, URL=%s, Subs=%d", s.Name, stream.Sources[0].Quality, stream.Sources[0].URL[:35], len(stream.Subtitles))
 		}
+	}
+}
+
+func TestSeriesIDToServers(t *testing.T) {
+	ane := NewAnimeEngine()
+	ctx := context.Background()
+
+	// Pass series ID directly instead of episode ID
+	servers, err := ane.GetServers(ctx, "anime-frieren-beyond-journeys-end-481")
+	if err != nil {
+		t.Fatalf("GetServers failed for series ID: %v", err)
+	}
+	if len(servers) == 0 {
+		t.Fatalf("Expected servers for series ID, got 0")
+	}
+	t.Logf("Got %d servers for series ID: %s", len(servers), servers[0].Name)
+	if !strings.Contains(servers[0].ID, "9227") {
+		t.Fatalf("Expected episode 9227 (Frieren Ep 1), got: %s", servers[0].ID)
 	}
 }

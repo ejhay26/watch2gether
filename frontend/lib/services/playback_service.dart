@@ -12,6 +12,7 @@ class PlaybackService extends ChangeNotifier {
   String? subtitle;
   String? streamUrl;
   StreamResult? streamResult;
+  String? audioTrack;
   bool isFloating = false;
 
   void startFloating({
@@ -23,6 +24,7 @@ class PlaybackService extends ChangeNotifier {
     String? activeSubtitle,
     required String activeStreamUrl,
     StreamResult? activeStreamResult,
+    String? activeAudioTrack,
   }) {
     player = activePlayer;
     controller = activeController;
@@ -32,6 +34,7 @@ class PlaybackService extends ChangeNotifier {
     subtitle = activeSubtitle;
     streamUrl = activeStreamUrl;
     streamResult = activeStreamResult;
+    audioTrack = activeAudioTrack;
     isFloating = true;
     notifyListeners();
   }
@@ -48,6 +51,7 @@ class PlaybackService extends ChangeNotifier {
     subtitle = null;
     streamUrl = null;
     streamResult = null;
+    audioTrack = null;
     notifyListeners();
   }
 

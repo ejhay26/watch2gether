@@ -94,6 +94,12 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     setState(() => _isLaunchingPlayer = true);
 
     try {
+      if (episode == null && _episodes.isEmpty && (widget.item.type == 'tv' || _isAnime)) {
+        final loaded = await _api.getEpisodes(widget.item.id, season: _selectedSeason);
+        if (loaded.isNotEmpty) {
+          _episodes = loaded;
+        }
+      }
       final epId = episode?.id ?? (_episodes.isNotEmpty ? _episodes[0].id : widget.item.id);
       final srvs = await _api.getServers(epId, title: widget.item.title);
       String srvId = epId;
@@ -270,6 +276,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
             initialRoomCode: roomCode,
             streamResult: streamRes,
             isPartySynced: isPartySynced,
+            initialAudioTrack: _preferDub ? '[DUB] English Dub' : (_isAnime ? '[SUB] Japanese Audio' : 'Original Audio (English)'),
           ),
         ),
       );

@@ -33,13 +33,6 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             ],
           ),
 
-          // Floating Mini-Player (Persistent across all tabs, search, and navigation)
-          Consumer<PlaybackService>(
-            builder: (context, playbackService, _) {
-              return FloatingMiniPlayer(playbackService: playbackService);
-            },
-          ),
-
           // Floating Navigation Bottom Bar with optimal bottom offset
           Positioned(
             left: 0,
@@ -52,6 +45,13 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                 onTap: (idx) => setState(() => _currentIndex = idx),
               ),
             ),
+          ),
+
+          // Floating Mini-Player (Persistent across all tabs, search, and navigation, floating above nav bar)
+          Consumer<PlaybackService>(
+            builder: (context, playbackService, _) {
+              return FloatingMiniPlayer(playbackService: playbackService);
+            },
           ),
         ],
       ),
