@@ -571,7 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (info == null || !mounted) return;
       final latestVersion = info['version'] as String? ?? '';
       
-      String currentVersion = "1.0.2";
+      String currentVersion = "1.0.6";
       try {
         final pkgInfo = await PackageInfo.fromPlatform();
         if (pkgInfo.version.isNotEmpty) {
@@ -580,16 +580,30 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (_) {}
 
       if (latestVersion.isNotEmpty && _isNewerVersion(latestVersion, currentVersion)) {
-        final apkUrl = info['android_apk'] as String? ?? '';
+        String downloadUrl = '';
+        if (Platform.isWindows) {
+          downloadUrl = (info['windows_exe'] as String?)?.isNotEmpty == true
+              ? (info['windows_exe'] as String)
+              : (info['windows_zip'] as String? ?? '');
+        } else if (Platform.isMacOS) {
+          downloadUrl = info['macos_dmg'] as String? ?? '';
+        } else if (Platform.isLinux) {
+          downloadUrl = info['linux_appimage'] as String? ?? '';
+        } else {
+          downloadUrl = info['android_apk'] as String? ?? '';
+        }
+        if (downloadUrl.isEmpty) {
+          downloadUrl = 'https://github.com/ejhay26/watch2gether/releases/latest';
+        }
         final releaseNotes = info['release_notes'] as String? ?? 'A new version of WatchTogether is available.';
         if (mounted) {
-          _showUpdateDialog(latestVersion, releaseNotes, apkUrl);
+          _showUpdateDialog(latestVersion, releaseNotes, downloadUrl);
         }
       }
     } catch (_) {}
   }
 
-  void _showUpdateDialog(String version, String releaseNotes, String apkUrl) {
+  void _showUpdateDialog(String version, String releaseNotes, String downloadUrl) {
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -641,8 +655,8 @@ class _HomeScreenState extends State<HomeScreen> {
             label: const Text("Download Update", style: TextStyle(fontWeight: FontWeight.bold)),
             onPressed: () async {
               Navigator.of(ctx).pop();
-              if (apkUrl.isNotEmpty) {
-                final uri = Uri.parse(apkUrl);
+              if (downloadUrl.isNotEmpty) {
+                final uri = Uri.parse(downloadUrl);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 }

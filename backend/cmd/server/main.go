@@ -71,7 +71,7 @@ func main() {
 
 	// 4. Fiber App Setup with Safe Error Handling
 	app := fiber.New(fiber.Config{
-		AppName:      "Watch2Gether API v1.0",
+		AppName:      "Watch2Gether API v1.0.6",
 		ServerHeader: "Watch2Gether",
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
@@ -130,12 +130,15 @@ func main() {
 	// App Version & In-App Update API
 	app.Get("/api/v1/app/version", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"version": "1.0.2",
-			"build_number": 3,
-			"release_notes":  "Real movie stream resolutions (eliminated gameplays), persistent room stream rejoining, improved mobile touch responsiveness, and smarter party playback synchronization.",
+			"version":        "1.0.6",
+			"build_number":   6,
+			"release_notes":  "Multiplatform release with Linux AppImage, macOS Universal DMG, Windows Portable (.exe & .zip), and Android Universal APK. Direct English DUB & Japanese SUB stream switching, multi-language subtitles, and elevated floating miniplayer.",
 			"mandatory":      false,
-			"android_apk":    "https://github.com/ejhay26/watch2gether/releases/latest/download/app-release.apk",
-			"windows_zip":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watchtogether-windows.zip",
+			"android_apk":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-android-universal.apk",
+			"windows_zip":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-portable.zip",
+			"windows_exe":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-portable.exe",
+			"linux_appimage": "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-linux-x86_64.AppImage",
+			"macos_dmg":      "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-macos-universal.dmg",
 		})
 	})
 

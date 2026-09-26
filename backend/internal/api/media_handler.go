@@ -35,7 +35,7 @@ func (h *MediaHandler) Health(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"status":  "ok",
 		"service": "watch2gether-backend",
-		"version": "1.0.0",
+		"version": "1.0.6",
 	})
 }
 

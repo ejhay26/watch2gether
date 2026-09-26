@@ -21,22 +21,35 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = flutter.versionCode ?: 6
+        versionName = flutter.versionName ?: "1.0.6"
+    }
+
+    val customKeyFile = when {
+        file("newkey").exists() -> file("newkey")
+        file("${rootDir}/newkey").exists() -> file("${rootDir}/newkey")
+        file("C:/Users/Administrator/Documents/git/newkey").exists() -> file("C:/Users/Administrator/Documents/git/newkey")
+        else -> null
     }
 
     signingConfigs {
-        create("release") {
-            keyAlias = "key1"
-            keyPassword = "12345678"
-            storeFile = file("C:/Users/Administrator/Documents/git/newkey")
-            storePassword = "12345678"
+        if (customKeyFile != null && customKeyFile.exists()) {
+            create("release") {
+                keyAlias = "key1"
+                keyPassword = "12345678"
+                storeFile = customKeyFile
+                storePassword = "12345678"
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (customKeyFile != null && customKeyFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             isShrinkResources = false
         }

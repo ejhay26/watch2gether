@@ -18,8 +18,18 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  String _appVersion = '1.0.2';
-  String _buildNumber = '3';
+  String _appVersion = '1.0.6';
+  String _buildNumber = '6';
+
+  String _getPlatformLabel() {
+    if (kIsWeb) return 'Web Client';
+    if (Platform.isWindows) return 'Windows Desktop';
+    if (Platform.isMacOS) return 'macOS Desktop';
+    if (Platform.isLinux) return 'Linux Desktop';
+    if (Platform.isAndroid) return 'Android Mobile';
+    if (Platform.isIOS) return 'iOS Mobile';
+    return 'Desktop Client';
+  }
 
   @override
   void initState() {
@@ -311,7 +321,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text('WatchTogether Client', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14.5)),
-                                Text('Version $_appVersion (Build $_buildNumber) • ${isDesktop ? "Windows Desktop" : "Android Mobile"}',
+                                Text('Version $_appVersion (Build $_buildNumber) • ${_getPlatformLabel()}',
                                     style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                               ],
                             ),

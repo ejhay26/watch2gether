@@ -7,16 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Tag Name (e.g. v1.0.3)"
+        description: "Release Tag Name (e.g. v1.0.6)"
         required: false
-        default: "v1.0.3"
+        default: "v1.0.6"
 
 permissions:
   contents: write
 
 jobs:
   build-android:
-    name: Build Android Release APK
+    name: Build Android Universal APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -49,16 +49,17 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
-      - name: Build Android Release APK
+      - name: Build Android Universal Release APK
         working-directory: frontend
         run: flutter build apk --release
 
-      - name: Rename and Prepare APK
+      - name: Prepare APK Artifacts
         run: |
           mkdir -p release-artifacts
-          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-${{ steps.vars.outputs.tag }}.apk"
+          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-universal-${{ steps.vars.outputs.tag }}.apk"
+          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-universal.apk"
 
-      - name: Upload Android Artifact
+      - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-release
@@ -66,7 +67,7 @@ jobs:
           retention-days: 7
 
   build-windows:
-    name: Build Windows Desktop Release
+    name: Build Windows Desktop Portable
     runs-on: windows-latest
     steps:
       - name: Checkout Source Code
@@ -101,38 +102,225 @@ jobs:
         working-directory: frontend
         run: flutter build windows --release
 
-      - name: Archive Windows Release Bundle
+      - name: Package Portable Windows Zip and Executable
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-artifacts
-          $zipPath = "release-artifacts/watch2gether-windows-${{ steps.vars.outputs.tag }}.zip"
-          Compress-Archive -Path "frontend/build/windows/x64/runner/Release/*" -DestinationPath $zipPath -Force
+          $tag = "${{ steps.vars.outputs.tag }}"
+          
+          # 1. Portable Zip Archive
+          $zipPath = "release-artifacts/watch2gether-windows-portable-$tag.zip"
+          & 7z a -tzip -mx=9 $zipPath "./frontend/build/windows/x64/runner/Release/*"
+          Copy-Item $zipPath "release-artifacts/watch2gether-windows-portable.zip" -Force
 
-      - name: Upload Windows Artifact
+          # 2. Portable Standalone SFX Exe
+          $sfxCandidates = @(
+            "C:\Program Files\7-Zip\7z.sfx",
+            "C:\Program Files (x86)\7-Zip\7z.sfx",
+            "$env:ProgramFiles\7-Zip\7z.sfx"
+          )
+          $sfxModule = $sfxCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($sfxModule) {
+            $exePath = "release-artifacts/watch2gether-windows-portable-$tag.exe"
+            & 7z a -sfx"$sfxModule" -mx=9 $exePath "./frontend/build/windows/x64/runner/Release/*"
+            Copy-Item $exePath "release-artifacts/watch2gether-windows-portable.exe" -Force
+          }
+
+      - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: release-artifacts/*.zip
+          path: release-artifacts/*
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Linux Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev mpv file wget
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: "stable"
+          cache: true
+
+      - name: Determine Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Enable Linux Desktop in Flutter
+        run: flutter config --enable-linux-desktop
+
+      - name: Install Dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Build Linux Desktop Release
+        working-directory: frontend
+        run: flutter build linux --release
+
+      - name: Package Linux AppImage and Tarball
+        run: |
+          mkdir -p release-artifacts
+          TAG="${{ steps.vars.outputs.tag }}"
+          
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -r frontend/build/linux/x64/release/bundle/* AppDir/usr/bin/
+          
+          # Create desktop shortcut specification
+          cat << 'EOF' > AppDir/watch2gether.desktop
+          [Desktop Entry]
+          Name=Watch2Gether
+          Comment=Location-based Watch Party & Video Streaming App
+          Exec=watch2gether
+          Icon=watch2gether
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Video;Player;
+          EOF
+          cp AppDir/watch2gether.desktop AppDir/usr/share/applications/
+          
+          # Copy application icon
+          if [ -f frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png ]; then
+            cp frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png AppDir/watch2gether.png
+            cp frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png AppDir/usr/share/icons/hicolor/256x256/apps/watch2gether.png
+          else
+            touch AppDir/watch2gether.png
+          fi
+          
+          # Create AppRun entrypoint
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/watch2gether" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          
+          # Download appimagetool and generate AppImage
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" || true
+          if [ -f "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" ]; then
+            cp "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" "release-artifacts/watch2gether-linux-x86_64.AppImage"
+          fi
+          
+          # Also package portable tarball
+          tar -czvf "release-artifacts/watch2gether-linux-x86_64-${TAG}.tar.gz" -C frontend/build/linux/x64/release/bundle .
+          cp "release-artifacts/watch2gether-linux-x86_64-${TAG}.tar.gz" "release-artifacts/watch2gether-linux-x86_64.tar.gz"
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: release-artifacts/*
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS Universal DMG
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: "stable"
+          cache: true
+
+      - name: Determine Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Enable macOS Desktop in Flutter
+        run: flutter config --enable-macos-desktop
+
+      - name: Install Dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Build macOS Release Application Bundle
+        working-directory: frontend
+        run: flutter build macos --release
+
+      - name: Package macOS Universal DMG and Zip
+        run: |
+          mkdir -p release-artifacts dmg_root
+          TAG="${{ steps.vars.outputs.tag }}"
+          
+          # Prepare DMG root with app bundle and Applications shortcut
+          cp -R "frontend/build/macos/Build/Products/Release/watch2gether.app" dmg_root/
+          ln -s /Applications dmg_root/Applications
+          
+          # Create universal DMG image
+          hdiutil create -volname "Watch2Gether" -srcfolder dmg_root -ov -format UDZO "release-artifacts/watch2gether-macos-universal-${TAG}.dmg"
+          cp "release-artifacts/watch2gether-macos-universal-${TAG}.dmg" "release-artifacts/watch2gether-macos-universal.dmg"
+          
+          # Create alternate zip archive
+          cd "frontend/build/macos/Build/Products/Release"
+          zip -r -y "../../../../../release-artifacts/watch2gether-macos-${TAG}.zip" watch2gether.app
+          cp "../../../../../release-artifacts/watch2gether-macos-${TAG}.zip" "../../../../../release-artifacts/watch2gether-macos.zip"
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: release-artifacts/*
           retention-days: 7
 
   publish-release:
     name: Publish Multiplatform GitHub Release
-    needs: [build-android, build-windows]
+    needs: [build-android, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Download Android Artifact
+      - name: Download Android Artifacts
         uses: actions/download-artifact@v4
         with:
           name: android-release
           path: release-files
 
-      - name: Download Windows Artifact
+      - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
         with:
           name: windows-release
+          path: release-files
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: release-files
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release
           path: release-files
 
       - name: Determine Release Tag
@@ -145,30 +333,45 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Generate Release Notes Body with Direct Download Links
+      - name: Generate Multiplatform Release Notes Body
         run: |
           TAG="${{ steps.vars.outputs.tag }}"
           REPO="${{ github.repository }}"
-          APK_NAME="watch2gether-android-${TAG}.apk"
-          ZIP_NAME="watch2gether-windows-${TAG}.zip"
 
           cat <<EOF > release_notes.md
-          # 🚀 Watch2Gether Release ${TAG}
+          # 🎬 Watch2Gether Release ${TAG}
 
-          ### 📥 Direct Downloads
-          Click below to download directly without searching through dropdown assets:
+          Official multiplatform release of Watch2Gether supporting Android, Windows, Linux, and macOS.
 
-          - 📱 [**Download Android APK (Direct)**](https://github.com/${REPO}/releases/download/${TAG}/${APK_NAME})
-          - 💻 [**Download Windows Desktop (Direct Zip)**](https://github.com/${REPO}/releases/download/${TAG}/${ZIP_NAME})
+          ### 🚀 Direct Downloads by Platform
+
+          #### 📱 Android
+          - 📦 [**Download Universal Release APK**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-android-universal-${TAG}.apk)
+            *(Compatible with ARM64, ARMv7, and x86_64 devices)*
+
+          #### 🪟 Windows
+          - ⚡ [**Download Windows Portable (.exe)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-portable-${TAG}.exe)
+            *(Self-contained portable single executable — no installation required)*
+          - 📦 [**Download Windows Portable (.zip)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-portable-${TAG}.zip)
+
+          #### 🐧 Linux
+          - 📦 [**Download Linux AppImage (.AppImage)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.AppImage)
+            *(Make executable with \`chmod +x\` and run on Ubuntu, Fedora, Arch, Debian, etc.)*
+          - 📦 [**Download Linux Tarball (.tar.gz)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.tar.gz)
+
+          #### 🍏 macOS
+          - 💿 [**Download macOS Universal DMG (.dmg)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-universal-${TAG}.dmg)
+            *(Universal image compatible with Apple Silicon M1/M2/M3/M4 & Intel Macs)*
+          - 📦 [**Download macOS App Bundle (.zip)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-${TAG}.zip)
 
           ---
 
-          ### ✨ Key Features & Improvements
-          - **Floating Mini-Player**: Persistent picture-in-picture mini-player appears seamlessly when returning to Home, Search, History, or Settings with uninterruted playback.
-          - **Mobile Fullscreen Auto-Rotation**: Fixed horizontal lock bug. Exiting fullscreen on mobile immediately restores vertical portrait mode and re-enables native auto-rotation and rotation buttons.
-          - **Concentric Audio/Video HUD**: Coaxial center alignment for the Play/Pause button and buffering progress indicator with zero visual shift or jitter.
-          - **Full Anime Stream Support**: Restored direct HLS 1080p playback for all anime mirrors including HiAnime and Frieren: Beyond Journey's End.
-          - **High-Contrast Toast Notifications**: Replaced low-contrast toast messages with luminous, readable toast pills with clear visual indicators.
+          ### ✨ What's New in ${TAG}
+          - **Multiplatform Desktop & Mobile**: Full native packaging across Android (Universal APK), Windows (Portable .exe & .zip), Linux (AppImage & tarball), and macOS (Universal DMG).
+          - **Elevated Floating Mini-Player**: Picture-in-picture miniplayer hovers cleanly 10–14px above the floating navigation bar with zero occlusion.
+          - **Authentic English DUB & Multi-Language Subtitles**: Direct audio endpoint routing with support for English Dub and Japanese Sub, plus 9 subtitle languages (English, Spanish, French, German, Italian, Portuguese, Russian, Arabic).
+          - **Accurate Anime Series Episode Mapping**: Fixed slug resolution to prevent series IDs from resolving to unrelated shows (e.g. One Piece) and mapped canonical episode indices correctly.
+          - **Standardized Frosted Glass Theme**: Polished dark translucent frosted glass interface with subtle Gaussian blur and refined hairline borders.
           EOF
 
       - name: Create or Update GitHub Release
