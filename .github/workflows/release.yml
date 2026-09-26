@@ -95,7 +95,7 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          choco install inno-setup -y --no-progress
+          choco install innosetup -y --no-progress
 
       - name: Enable Windows Desktop in Flutter
         run: flutter config --enable-windows-desktop

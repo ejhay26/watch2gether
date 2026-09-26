@@ -3,6 +3,7 @@
 import (
 	"context"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -162,6 +163,19 @@ func main() {
 	// Graceful shutdown handling
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Start auxiliary listener on port 8000 (if primary is 8080) so ngrok works whether pointing to 8080 or 8000
+	altPort := "8000"
+	if port == "8000" {
+		altPort = "8080"
+	}
+	go func() {
+		ln, err := net.Listen("tcp", ":"+altPort)
+		if err == nil {
+			log.Printf("Auxiliary listener active on http://localhost:%s (compatible with ngrok 8000/8080)", altPort)
+			_ = app.Listener(ln)
+		}
+	}()
 
 	go func() {
 		log.Printf("Listening on http://localhost:%s", port)
