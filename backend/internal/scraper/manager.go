@@ -463,22 +463,30 @@ func cleanAnimeSearchTitle(t string) string {
 }
 
 func isAnimeTitleMatch(query string, candidate string) bool {
-	qLower := strings.ToLower(query)
-	cLower := strings.ToLower(candidate)
-	if strings.Contains(cLower, qLower) || strings.Contains(qLower, cLower) {
+	qLower := strings.TrimSpace(strings.ToLower(query))
+	cLower := strings.TrimSpace(strings.ToLower(candidate))
+	if qLower == "" || cLower == "" {
+		return false
+	}
+	if qLower == cLower {
 		return true
 	}
-	qWords := strings.Fields(qLower)
-	for _, w := range qWords {
-		w = strings.Trim(w, ":,.-!?'\"")
-		if len(w) > 3 {
-			if strings.Contains(cLower, w) {
-				return true
-			}
-		}
+	reg := regexp.MustCompile(`[^a-zA-Z0-9\s]`)
+	qNorm := strings.TrimSpace(reg.ReplaceAllString(qLower, " "))
+	cNorm := strings.TrimSpace(reg.ReplaceAllString(cLower, " "))
+	if qNorm == cNorm {
+		return true
+	}
+	// Full normalized phrase containment (e.g. "Frieren" in "Frieren Beyond Journey's End")
+	if len(qNorm) >= 4 && strings.Contains(cNorm, qNorm) {
+		return true
+	}
+	if len(cNorm) >= 4 && strings.Contains(qNorm, cNorm) {
+		return true
 	}
 	return false
 }
+
 func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server, error) {
 	if strings.HasPrefix(episodeId, "anime-") {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -488,47 +496,67 @@ func (m *Manager) GetServersWithTitle(episodeId string, title string) ([]Server,
 	if strings.HasPrefix(episodeId, "demo-") {
 		return m.demo.GetServers(episodeId)
 	}
-	if strings.HasPrefix(episodeId, "tmdb-") || strings.HasPrefix(episodeId, "movie-") || strings.HasPrefix(episodeId, "archive-") || title != "" || !strings.Contains(episodeId, "flix") {
-		var combined []Server
 
-		// Check if anime engine can provide [SUB] and [DUB] servers for this title
-		if m.animeEngine != nil && title != "" {
-			cleanTitle := cleanAnimeSearchTitle(title)
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-			animeItems, aErr := m.animeEngine.Search(ctx, cleanTitle)
-			cancel()
-			if aErr == nil && len(animeItems) > 0 && isAnimeTitleMatch(cleanTitle, animeItems[0].Title) {
-				ctxEp, cancelEp := context.WithTimeout(context.Background(), 6*time.Second)
-				eps, epErr := m.animeEngine.GetEpisodes(ctxEp, animeItems[0].ID)
-				cancelEp()
-				if epErr == nil && len(eps) > 0 {
-					targetEpIdx := 0
-					reEpNum := regexp.MustCompile(`(?i)[eE][pP]?[-_]?(\d+)`)
-					if matches := reEpNum.FindStringSubmatch(episodeId); len(matches) > 1 {
-						if n, err := strconv.Atoi(matches[1]); err == nil && n >= 1 && n <= len(eps) {
-							targetEpIdx = n - 1
-						}
+	isMovie := strings.HasPrefix(episodeId, "tmdb-movie-") || strings.HasPrefix(episodeId, "movie-") || strings.HasPrefix(episodeId, "archive-")
+
+	// If it is explicitly a movie, NEVER query the anime engine! Movies belong strictly to videoEngine!
+	if isMovie {
+		srvs, err := m.videoEngine.GetServers(episodeId, title)
+		if err == nil && len(srvs) > 0 {
+			return srvs, nil
+		}
+		srvs, err = m.flixhq.GetServers(episodeId)
+		if err == nil && len(srvs) > 0 {
+			return srvs, nil
+		}
+		return m.videoEngine.GetServers(episodeId, title)
+	}
+
+	// For TV series / general media:
+	var combined []Server
+	srvs, err := m.videoEngine.GetServers(episodeId, title)
+	if err == nil && len(srvs) > 0 {
+		combined = append(combined, srvs...)
+	}
+
+	// Only query anime engine if this is a verified anime TV series
+	if m.animeEngine != nil && title != "" {
+		cleanTitle := cleanAnimeSearchTitle(title)
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		animeItems, aErr := m.animeEngine.Search(ctx, cleanTitle)
+		cancel()
+		if aErr == nil && len(animeItems) > 0 && isAnimeTitleMatch(cleanTitle, animeItems[0].Title) {
+			ctxEp, cancelEp := context.WithTimeout(context.Background(), 4*time.Second)
+			eps, epErr := m.animeEngine.GetEpisodes(ctxEp, animeItems[0].ID)
+			cancelEp()
+			if epErr == nil && len(eps) > 0 {
+				targetEpIdx := 0
+				reEpNum := regexp.MustCompile(`(?i)[eE][pP]?[-_]?(\d+)`)
+				if matches := reEpNum.FindStringSubmatch(episodeId); len(matches) > 1 {
+					if n, err := strconv.Atoi(matches[1]); err == nil && n >= 1 && n <= len(eps) {
+						targetEpIdx = n - 1
 					}
-					targetEp := eps[targetEpIdx]
-					ctxSrv, cancelSrv := context.WithTimeout(context.Background(), 6*time.Second)
-					animeSrvs, sErr := m.animeEngine.GetServers(ctxSrv, targetEp.ID)
-					cancelSrv()
-					if sErr == nil && len(animeSrvs) > 0 {
+				}
+				targetEp := eps[targetEpIdx]
+				ctxSrv, cancelSrv := context.WithTimeout(context.Background(), 4*time.Second)
+				animeSrvs, sErr := m.animeEngine.GetServers(ctxSrv, targetEp.ID)
+				cancelSrv()
+				if sErr == nil && len(animeSrvs) > 0 {
+					if len(combined) == 0 {
+						combined = animeSrvs
+					} else {
+						// Append anime servers cleanly after any verified direct servers
 						combined = append(combined, animeSrvs...)
 					}
 				}
 			}
 		}
-
-		srvs, err := m.videoEngine.GetServers(episodeId, title)
-		if err == nil && len(srvs) > 0 {
-			combined = append(combined, srvs...)
-		}
-		if len(combined) > 0 {
-			return combined, nil
-		}
 	}
-	srvs, err := m.flixhq.GetServers(episodeId)
+
+	if len(combined) > 0 {
+		return combined, nil
+	}
+	srvs, err = m.flixhq.GetServers(episodeId)
 	if err == nil && len(srvs) > 0 {
 		return srvs, nil
 	}
@@ -548,7 +576,10 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 	if strings.HasPrefix(serverId, "demo-") {
 		return m.demo.GetStream(serverId)
 	}
-	if strings.HasPrefix(serverId, "tmdb-") || strings.HasPrefix(serverId, "movie-") || strings.Contains(serverId, "-srv-") || strings.HasPrefix(serverId, "archive-") || title != "" || !strings.Contains(serverId, "flix") {
+
+	isMovie := strings.HasPrefix(serverId, "tmdb-movie-") || strings.HasPrefix(serverId, "movie-") || strings.HasPrefix(serverId, "archive-")
+
+	if isMovie {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 
@@ -560,49 +591,65 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 			}
 			return stream, nil
 		}
+		stream, err = m.flixhq.GetStream(serverId)
+		if err == nil && stream != nil && len(stream.Sources) > 0 {
+			return stream, nil
+		}
+		return m.videoEngine.GetStream(ctx, serverId, title)
+	}
 
-		// Fallback to anime engine if this might be an anime title or series
-		if m.animeEngine != nil && title != "" {
-			cleanTitle := cleanAnimeSearchTitle(title)
-			animeItems, aErr := m.animeEngine.Search(ctx, cleanTitle)
-			if aErr == nil && len(animeItems) > 0 && isAnimeTitleMatch(cleanTitle, animeItems[0].Title) {
-				eps, epErr := m.animeEngine.GetEpisodes(ctx, animeItems[0].ID)
-				if epErr == nil && len(eps) > 0 {
-					targetEpIdx := 0
-					reEpNum := regexp.MustCompile(`(?i)[eE][pP]?[-_]?(\d+)`)
-					if matches := reEpNum.FindStringSubmatch(serverId); len(matches) > 1 {
-						if n, err := strconv.Atoi(matches[1]); err == nil && n >= 1 && n <= len(eps) {
-							targetEpIdx = n - 1
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	stream, err := m.videoEngine.GetStream(ctx, serverId, title)
+	if err == nil && stream != nil && len(stream.Sources) > 0 {
+		if len(stream.Subtitles) == 0 {
+			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
+			stream.Subtitles = subs
+		}
+		return stream, nil
+	}
+
+	// Fallback to anime engine ONLY if this is a verified anime title
+	if m.animeEngine != nil && title != "" {
+		cleanTitle := cleanAnimeSearchTitle(title)
+		animeItems, aErr := m.animeEngine.Search(ctx, cleanTitle)
+		if aErr == nil && len(animeItems) > 0 && isAnimeTitleMatch(cleanTitle, animeItems[0].Title) {
+			eps, epErr := m.animeEngine.GetEpisodes(ctx, animeItems[0].ID)
+			if epErr == nil && len(eps) > 0 {
+				targetEpIdx := 0
+				reEpNum := regexp.MustCompile(`(?i)[eE][pP]?[-_]?(\d+)`)
+				if matches := reEpNum.FindStringSubmatch(serverId); len(matches) > 1 {
+					if n, err := strconv.Atoi(matches[1]); err == nil && n >= 1 && n <= len(eps) {
+						targetEpIdx = n - 1
+					}
+				}
+				targetEp := eps[targetEpIdx]
+				servers, sErr := m.animeEngine.GetServers(ctx, targetEp.ID)
+				if sErr == nil && len(servers) > 0 {
+					pickServer := servers[0]
+					isDub := strings.Contains(strings.ToLower(serverId), "dub") || strings.Contains(strings.ToLower(title), "dub")
+					for _, s := range servers {
+						if isDub && strings.Contains(strings.ToUpper(s.Name), "[DUB]") {
+							pickServer = s
+							break
+						} else if !isDub && strings.Contains(strings.ToUpper(s.Name), "[SUB]") {
+							pickServer = s
+							break
 						}
 					}
-					targetEp := eps[targetEpIdx]
-					servers, sErr := m.animeEngine.GetServers(ctx, targetEp.ID)
-					if sErr == nil && len(servers) > 0 {
-						pickServer := servers[0]
-						isDub := strings.Contains(strings.ToLower(serverId), "dub") || strings.Contains(strings.ToLower(title), "dub")
-						for _, s := range servers {
-							if isDub && strings.Contains(strings.ToUpper(s.Name), "[DUB]") {
-								pickServer = s
-								break
-							} else if !isDub && strings.Contains(strings.ToUpper(s.Name), "[SUB]") {
-								pickServer = s
-								break
-							}
-						}
-						animeStream, stErr := m.animeEngine.GetStream(ctx, pickServer.ID)
-						if stErr == nil && animeStream != nil && len(animeStream.Sources) > 0 {
-							return animeStream, nil
-						}
+					animeStream, stErr := m.animeEngine.GetStream(ctx, pickServer.ID)
+					if stErr == nil && animeStream != nil && len(animeStream.Sources) > 0 {
+						return animeStream, nil
 					}
 				}
 			}
 		}
 	}
-	stream, err := m.flixhq.GetStream(serverId)
+
+	stream, err = m.flixhq.GetStream(serverId)
 	if err == nil && stream != nil && len(stream.Sources) > 0 {
 		return stream, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
 	return m.videoEngine.GetStream(ctx, serverId, title)
 }
