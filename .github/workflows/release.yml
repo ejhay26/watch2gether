@@ -115,51 +115,20 @@ jobs:
           $tag = "${{ steps.vars.outputs.tag }}"
 
           # 1. Compile Inno Setup Installer (.exe)
-          $issContent = @"
-#define MyAppName "Watch2Gether"
-#define MyAppVersion "$tag"
-#define MyAppPublisher "Watch2Gether"
-#define MyAppURL "https://github.com/${{ github.repository }}"
-#define MyAppExeName "watch2gether.exe"
-
-[Setup]
-AppId={{D37E8492-31C4-4B39-9A0A-2D884FEBC9E2}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
-DefaultGroupName={#MyAppName}
-AllowNoIcons=yes
-OutputDir=release-artifacts
-OutputBaseFilename=watch2gether-windows-x64-setup-$tag
-Compression=lzma2/max
-SolidCompression=yes
-WizardStyle=modern
-PrivilegesRequired=lowest
-
-[Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-
-[Files]
-Source: "frontend\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-[Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-"@
-          Set-Content -Path "inno_setup.iss" -Value $issContent -Encoding UTF8
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
-          Copy-Item "release-artifacts/watch2gether-windows-x64-setup-$tag.exe" "release-artifacts/watch2gether-windows-x64-setup.exe" -Force
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
+          if (-not $iscc) {
+            $candidates = @(
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              "C:\Program Files\Inno Setup 6\ISCC.exe"
+            )
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if ($iscc) {
+            & $iscc /DMyAppVersion="$tag" frontend/windows/installer/inno_setup.iss
+            if (Test-Path "release-artifacts/watch2gether-windows-x64-setup.exe") {
+              Copy-Item "release-artifacts/watch2gether-windows-x64-setup.exe" "release-artifacts/watch2gether-windows-x64-setup-$tag.exe" -Force
+            }
+          }
 
           # 2. Package Portable Single Executable (.exe) via 7z SFX
           $sfxCandidates = @(
@@ -170,15 +139,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
           $sfxModule = $sfxCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
           if ($sfxModule) {
-            $sfxCfg = @'
-;!@Install@!UTF-8!
-Title="Watch2Gether Portable"
-RunProgram="watch2gether.exe"
-;!@InstallEnd@!
-'@
+            $sfxCfg = ";!@Install@!UTF-8!`r`nTitle=`"Watch2Gether Portable`"`r`nRunProgram=`"watch2gether.exe`"`r`n;!@InstallEnd@!`r`n"
             Set-Content -Path "sfx_config.txt" -Value $sfxCfg -Encoding UTF8
             & 7z a -mx=9 "app_data.7z" "./frontend/build/windows/x64/runner/Release/*"
-            cmd.exe /c "copy /b ""$sfxModule"" + sfx_config.txt + app_data.7z ""release-artifacts\watch2gether-windows-x64-portable-$tag.exe"""
+            cmd.exe /c "copy /b `"$sfxModule`" + sfx_config.txt + app_data.7z `"release-artifacts\watch2gether-windows-x64-portable-$tag.exe`""
             Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
           }
 
@@ -243,24 +207,10 @@ RunProgram="watch2gether.exe"
           fi
           
           # Create .desktop file
-          cat << 'EOF' > AppDir/watch2gether.desktop
-[Desktop Entry]
-Name=Watch2Gether
-Comment=Watch movies and anime in sync with friends
-Exec=watch2gether
-Icon=watch2gether
-Terminal=false
-Type=Application
-Categories=AudioVideo;Video;Player;
-EOF
+          printf '[Desktop Entry]\nName=Watch2Gether\nComment=Watch movies and anime in sync with friends\nExec=watch2gether\nIcon=watch2gether\nTerminal=false\nType=Application\nCategories=AudioVideo;Video;Player;\n' > AppDir/watch2gether.desktop
           
           # Create AppRun
-          cat << 'EOF' > AppDir/AppRun
-#!/bin/sh
-HERE="$(dirname "$(readlink -f "${0}")")"
-export LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-exec "${HERE}/usr/bin/watch2gether" "$@"
-EOF
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/lib:${LD_LIBRARY_PATH}"\nexec "${HERE}/usr/bin/watch2gether" "$@"\n' > AppDir/AppRun
           chmod +x AppDir/AppRun
           
           # Download appimagetool and generate AppImage
@@ -378,30 +328,31 @@ EOF
           TAG="${{ steps.vars.outputs.tag }}"
           REPO="${{ github.repository }}"
 
-          cat <<EOF > release_notes.md
-          # 🎬 Watch2Gether Release ${TAG}
-
+          cat << 'EOF' > release_notes.md
+          # 🎬 Watch2Gether Release
           Official multiplatform release of Watch2Gether supporting Android, Windows, Linux, and macOS. All downloads are provided as pure native OS executables and packages without generic zip archives.
 
           ### 📥 Direct Application Downloads (Native OS Executables)
 
           | Platform | Target Architecture | Direct Download Link | Format |
           |:---:|:---|:---|:---:|
-          | 📱 **Android** | Android 7.0+ (ARM64 / ARMv7 / x86_64) | [**Download Android Universal APK**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-android-universal-${TAG}.apk) | \`.apk\` |
-          | 🪟 **Windows** | Windows 10 / 11 (Setup Installer) | [**Download Windows Setup Installer**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-x64-setup-${TAG}.exe) | \`.exe\` |
-          | 🪟 **Windows** | Windows 10 / 11 (Portable Executable) | [**Download Windows Portable (.exe)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-x64-portable-${TAG}.exe) | \`.exe\` |
-          | 🍏 **macOS** | Apple Silicon & Intel Macs | [**Download macOS Universal DMG**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-universal-${TAG}.dmg) | \`.dmg\` |
-          | 🐧 **Linux** | All Linux Distributions (x86_64) | [**Download Linux Standalone AppImage**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.AppImage) | \`.AppImage\` |
+          | 📱 **Android** | Android 7.0+ (ARM64 / ARMv7 / x86_64) | [**Download Android Universal APK**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-android-universal-TAG_PLACEHOLDER.apk) | `.apk` |
+          | 🪟 **Windows** | Windows 10 / 11 (Setup Installer) | [**Download Windows Setup Installer**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-setup-TAG_PLACEHOLDER.exe) | `.exe` |
+          | 🪟 **Windows** | Windows 10 / 11 (Portable Executable) | [**Download Windows Portable (.exe)**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-portable-TAG_PLACEHOLDER.exe) | `.exe` |
+          | 🍏 **macOS** | Apple Silicon & Intel Macs | [**Download macOS Universal DMG**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-macos-universal-TAG_PLACEHOLDER.dmg) | `.dmg` |
+          | 🐧 **Linux** | All Linux Distributions (x86_64) | [**Download Linux Standalone AppImage**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-linux-x86_64-TAG_PLACEHOLDER.AppImage) | `.AppImage` |
 
           ---
 
-          ### ✨ What's New in ${TAG}
-          - **Multiplatform Native OS Packages**: Pure native executables and packages across Android (\`.apk\`), Windows (\`.exe\` installer & portable), Linux (\`.AppImage\`), and macOS Universal (\`.dmg\`). No generic zip or tar compression archives.
+          ### ✨ What's New
+          - **Multiplatform Native OS Packages**: Pure native executables and packages across Android (.apk), Windows (.exe installer & portable), Linux (.AppImage), and macOS Universal (.dmg). No generic zip or tar compression archives.
           - **Elevated Floating Mini-Player**: Picture-in-picture miniplayer hovers cleanly above the floating navigation bar with zero occlusion.
           - **Authentic English DUB & Multi-Language Subtitles**: Direct audio endpoint routing with support for English Dub and Japanese Sub, plus 9 subtitle languages (English, Spanish, French, German, Italian, Portuguese, Russian, Arabic).
           - **Accurate Anime Series Episode Mapping**: Fixed slug resolution to prevent series IDs from resolving to unrelated shows and mapped canonical episode indices correctly.
           - **Standardized Frosted Glass Theme**: Polished dark translucent frosted glass interface with subtle Gaussian blur and refined hairline borders.
           EOF
+          sed -i "s|REPO_PLACEHOLDER|${REPO}|g" release_notes.md
+          sed -i "s|TAG_PLACEHOLDER|${TAG}|g" release_notes.md
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -409,7 +360,7 @@ EOF
           tag_name: ${{ steps.vars.outputs.tag }}
           name: "Watch2Gether Release ${{ steps.vars.outputs.tag }}"
           body_path: release_notes.md
-          draft: false
+          draft: true
           prerelease: false
           files: release-files/*
         env:
