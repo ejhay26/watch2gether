@@ -584,7 +584,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (Platform.isWindows) {
           downloadUrl = (info['windows_exe'] as String?)?.isNotEmpty == true
               ? (info['windows_exe'] as String)
-              : (info['windows_zip'] as String? ?? '');
+              : (info['windows_setup'] as String? ?? '');
         } else if (Platform.isMacOS) {
           downloadUrl = info['macos_dmg'] as String? ?? '';
         } else if (Platform.isLinux) {

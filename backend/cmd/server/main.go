@@ -135,8 +135,8 @@ func main() {
 			"release_notes":  "Multiplatform release with Linux AppImage, macOS Universal DMG, Windows Portable (.exe & .zip), and Android Universal APK. Direct English DUB & Japanese SUB stream switching, multi-language subtitles, and elevated floating miniplayer.",
 			"mandatory":      false,
 			"android_apk":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-android-universal.apk",
-			"windows_zip":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-portable.zip",
-			"windows_exe":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-portable.exe",
+			"windows_setup":  "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-x64-setup.exe",
+			"windows_exe":    "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-windows-x64-portable.exe",
 			"linux_appimage": "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-linux-x86_64.AppImage",
 			"macos_dmg":      "https://github.com/ejhay26/watch2gether/releases/latest/download/watch2gether-macos-universal.dmg",
 		})

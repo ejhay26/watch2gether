@@ -56,7 +56,8 @@ jobs:
       - name: Prepare APK Artifacts
         run: |
           mkdir -p release-artifacts
-          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-universal-${{ steps.vars.outputs.tag }}.apk"
+          TAG="${{ steps.vars.outputs.tag }}"
+          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-universal-${TAG}.apk"
           cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/watch2gether-android-universal.apk"
 
       - name: Upload Android Artifacts
@@ -67,7 +68,7 @@ jobs:
           retention-days: 7
 
   build-windows:
-    name: Build Windows Desktop Portable
+    name: Build Windows Desktop Executables
     runs-on: windows-latest
     steps:
       - name: Checkout Source Code
@@ -91,6 +92,11 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install inno-setup -y --no-progress
+
       - name: Enable Windows Desktop in Flutter
         run: flutter config --enable-windows-desktop
 
@@ -102,39 +108,89 @@ jobs:
         working-directory: frontend
         run: flutter build windows --release
 
-      - name: Package Portable Windows Zip and Executable
+      - name: Package Windows Setup Installer (.exe) and Portable (.exe)
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release-artifacts
+          New-Item -ItemType Directory -Force -Path release-artifacts | Out-Null
           $tag = "${{ steps.vars.outputs.tag }}"
-          
-          # 1. Portable Zip Archive
-          $zipPath = "release-artifacts/watch2gether-windows-portable-$tag.zip"
-          & 7z a -tzip -mx=9 $zipPath "./frontend/build/windows/x64/runner/Release/*"
-          Copy-Item $zipPath "release-artifacts/watch2gether-windows-portable.zip" -Force
 
-          # 2. Portable Standalone SFX Exe
+          # 1. Compile Inno Setup Installer (.exe)
+          $issContent = @"
+#define MyAppName "Watch2Gether"
+#define MyAppVersion "$tag"
+#define MyAppPublisher "Watch2Gether"
+#define MyAppURL "https://github.com/${{ github.repository }}"
+#define MyAppExeName "watch2gether.exe"
+
+[Setup]
+AppId={{D37E8492-31C4-4B39-9A0A-2D884FEBC9E2}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+AllowNoIcons=yes
+OutputDir=release-artifacts
+OutputBaseFilename=watch2gether-windows-x64-setup-$tag
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=lowest
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+Source: "frontend\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+"@
+          Set-Content -Path "inno_setup.iss" -Value $issContent -Encoding UTF8
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" inno_setup.iss
+          Copy-Item "release-artifacts/watch2gether-windows-x64-setup-$tag.exe" "release-artifacts/watch2gether-windows-x64-setup.exe" -Force
+
+          # 2. Package Portable Single Executable (.exe) via 7z SFX
           $sfxCandidates = @(
             "C:\Program Files\7-Zip\7z.sfx",
             "C:\Program Files (x86)\7-Zip\7z.sfx",
             "$env:ProgramFiles\7-Zip\7z.sfx"
           )
           $sfxModule = $sfxCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
           if ($sfxModule) {
-            $exePath = "release-artifacts/watch2gether-windows-portable-$tag.exe"
-            & 7z a -sfx"$sfxModule" -mx=9 $exePath "./frontend/build/windows/x64/runner/Release/*"
-            Copy-Item $exePath "release-artifacts/watch2gether-windows-portable.exe" -Force
+            $sfxCfg = @'
+;!@Install@!UTF-8!
+Title="Watch2Gether Portable"
+RunProgram="watch2gether.exe"
+;!@InstallEnd@!
+'@
+            Set-Content -Path "sfx_config.txt" -Value $sfxCfg -Encoding UTF8
+            & 7z a -mx=9 "app_data.7z" "./frontend/build/windows/x64/runner/Release/*"
+            cmd.exe /c "copy /b ""$sfxModule"" + sfx_config.txt + app_data.7z ""release-artifacts\watch2gether-windows-x64-portable-$tag.exe"""
+            Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
           }
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: release-artifacts/*
+          path: release-artifacts/*.exe
           retention-days: 7
 
   build-linux:
-    name: Build Linux AppImage
+    name: Build Linux Standalone AppImage
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Source Code
@@ -169,66 +225,55 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
-      - name: Build Linux Desktop Release
+      - name: Build Linux Release
         working-directory: frontend
         run: flutter build linux --release
 
-      - name: Package Linux AppImage and Tarball
+      - name: Package Linux Standalone AppImage (.AppImage)
         run: |
-          mkdir -p release-artifacts
+          mkdir -p release-artifacts AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/icons/hicolor/256x256/apps
           TAG="${{ steps.vars.outputs.tag }}"
           
-          # Create AppDir structure
-          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          # Copy Flutter bundle to AppDir
           cp -r frontend/build/linux/x64/release/bundle/* AppDir/usr/bin/
-          
-          # Create desktop shortcut specification
-          cat << 'EOF' > AppDir/watch2gether.desktop
-          [Desktop Entry]
-          Name=Watch2Gether
-          Comment=Location-based Watch Party & Video Streaming App
-          Exec=watch2gether
-          Icon=watch2gether
-          Terminal=false
-          Type=Application
-          Categories=AudioVideo;Video;Player;
-          EOF
-          cp AppDir/watch2gether.desktop AppDir/usr/share/applications/
-          
-          # Copy application icon
-          if [ -f frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png ]; then
-            cp frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png AppDir/watch2gether.png
-            cp frontend/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png AppDir/usr/share/icons/hicolor/256x256/apps/watch2gether.png
-          else
-            touch AppDir/watch2gether.png
+          if [ -f "frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" ]; then
+            cp "frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" AppDir/watch2gether.png
+            cp "frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" AppDir/usr/share/icons/hicolor/256x256/apps/watch2gether.png
+            cp "frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" AppDir/.DirIcon
           fi
           
-          # Create AppRun entrypoint
+          # Create .desktop file
+          cat << 'EOF' > AppDir/watch2gether.desktop
+[Desktop Entry]
+Name=Watch2Gether
+Comment=Watch movies and anime in sync with friends
+Exec=watch2gether
+Icon=watch2gether
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+EOF
+          
+          # Create AppRun
           cat << 'EOF' > AppDir/AppRun
-          #!/bin/sh
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-          exec "${HERE}/usr/bin/watch2gether" "$@"
-          EOF
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "${0}")")"
+export LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+exec "${HERE}/usr/bin/watch2gether" "$@"
+EOF
           chmod +x AppDir/AppRun
           
           # Download appimagetool and generate AppImage
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" || true
-          if [ -f "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" ]; then
-            cp "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" "release-artifacts/watch2gether-linux-x86_64.AppImage"
-          fi
-          
-          # Also package portable tarball
-          tar -czvf "release-artifacts/watch2gether-linux-x86_64-${TAG}.tar.gz" -C frontend/build/linux/x64/release/bundle .
-          cp "release-artifacts/watch2gether-linux-x86_64-${TAG}.tar.gz" "release-artifacts/watch2gether-linux-x86_64.tar.gz"
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage"
+          cp "release-artifacts/watch2gether-linux-x86_64-${TAG}.AppImage" "release-artifacts/watch2gether-linux-x86_64.AppImage"
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
-          path: release-artifacts/*
+          path: release-artifacts/*.AppImage
           retention-days: 7
 
   build-macos:
@@ -266,7 +311,7 @@ jobs:
         working-directory: frontend
         run: flutter build macos --release
 
-      - name: Package macOS Universal DMG and Zip
+      - name: Package macOS Universal DMG (.dmg)
         run: |
           mkdir -p release-artifacts dmg_root
           TAG="${{ steps.vars.outputs.tag }}"
@@ -278,17 +323,12 @@ jobs:
           # Create universal DMG image
           hdiutil create -volname "Watch2Gether" -srcfolder dmg_root -ov -format UDZO "release-artifacts/watch2gether-macos-universal-${TAG}.dmg"
           cp "release-artifacts/watch2gether-macos-universal-${TAG}.dmg" "release-artifacts/watch2gether-macos-universal.dmg"
-          
-          # Create alternate zip archive
-          cd "frontend/build/macos/Build/Products/Release"
-          zip -r -y "../../../../../release-artifacts/watch2gether-macos-${TAG}.zip" watch2gether.app
-          cp "../../../../../release-artifacts/watch2gether-macos-${TAG}.zip" "../../../../../release-artifacts/watch2gether-macos.zip"
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
-          path: release-artifacts/*
+          path: release-artifacts/*.dmg
           retention-days: 7
 
   publish-release:
@@ -341,36 +381,25 @@ jobs:
           cat <<EOF > release_notes.md
           # 🎬 Watch2Gether Release ${TAG}
 
-          Official multiplatform release of Watch2Gether supporting Android, Windows, Linux, and macOS.
+          Official multiplatform release of Watch2Gether supporting Android, Windows, Linux, and macOS. All downloads are provided as pure native OS executables and packages without generic zip archives.
 
-          ### 🚀 Direct Downloads by Platform
+          ### 📥 Direct Application Downloads (Native OS Executables)
 
-          #### 📱 Android
-          - 📦 [**Download Universal Release APK**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-android-universal-${TAG}.apk)
-            *(Compatible with ARM64, ARMv7, and x86_64 devices)*
-
-          #### 🪟 Windows
-          - ⚡ [**Download Windows Portable (.exe)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-portable-${TAG}.exe)
-            *(Self-contained portable single executable — no installation required)*
-          - 📦 [**Download Windows Portable (.zip)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-portable-${TAG}.zip)
-
-          #### 🐧 Linux
-          - 📦 [**Download Linux AppImage (.AppImage)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.AppImage)
-            *(Make executable with \`chmod +x\` and run on Ubuntu, Fedora, Arch, Debian, etc.)*
-          - 📦 [**Download Linux Tarball (.tar.gz)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.tar.gz)
-
-          #### 🍏 macOS
-          - 💿 [**Download macOS Universal DMG (.dmg)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-universal-${TAG}.dmg)
-            *(Universal image compatible with Apple Silicon M1/M2/M3/M4 & Intel Macs)*
-          - 📦 [**Download macOS App Bundle (.zip)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-${TAG}.zip)
+          | Platform | Target Architecture | Direct Download Link | Format |
+          |:---:|:---|:---|:---:|
+          | 📱 **Android** | Android 7.0+ (ARM64 / ARMv7 / x86_64) | [**Download Android Universal APK**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-android-universal-${TAG}.apk) | \`.apk\` |
+          | 🪟 **Windows** | Windows 10 / 11 (Setup Installer) | [**Download Windows Setup Installer**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-x64-setup-${TAG}.exe) | \`.exe\` |
+          | 🪟 **Windows** | Windows 10 / 11 (Portable Executable) | [**Download Windows Portable (.exe)**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-windows-x64-portable-${TAG}.exe) | \`.exe\` |
+          | 🍏 **macOS** | Apple Silicon & Intel Macs | [**Download macOS Universal DMG**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-macos-universal-${TAG}.dmg) | \`.dmg\` |
+          | 🐧 **Linux** | All Linux Distributions (x86_64) | [**Download Linux Standalone AppImage**](https://github.com/${REPO}/releases/download/${TAG}/watch2gether-linux-x86_64-${TAG}.AppImage) | \`.AppImage\` |
 
           ---
 
           ### ✨ What's New in ${TAG}
-          - **Multiplatform Desktop & Mobile**: Full native packaging across Android (Universal APK), Windows (Portable .exe & .zip), Linux (AppImage & tarball), and macOS (Universal DMG).
-          - **Elevated Floating Mini-Player**: Picture-in-picture miniplayer hovers cleanly 10–14px above the floating navigation bar with zero occlusion.
+          - **Multiplatform Native OS Packages**: Pure native executables and packages across Android (\`.apk\`), Windows (\`.exe\` installer & portable), Linux (\`.AppImage\`), and macOS Universal (\`.dmg\`). No generic zip or tar compression archives.
+          - **Elevated Floating Mini-Player**: Picture-in-picture miniplayer hovers cleanly above the floating navigation bar with zero occlusion.
           - **Authentic English DUB & Multi-Language Subtitles**: Direct audio endpoint routing with support for English Dub and Japanese Sub, plus 9 subtitle languages (English, Spanish, French, German, Italian, Portuguese, Russian, Arabic).
-          - **Accurate Anime Series Episode Mapping**: Fixed slug resolution to prevent series IDs from resolving to unrelated shows (e.g. One Piece) and mapped canonical episode indices correctly.
+          - **Accurate Anime Series Episode Mapping**: Fixed slug resolution to prevent series IDs from resolving to unrelated shows and mapped canonical episode indices correctly.
           - **Standardized Frosted Glass Theme**: Polished dark translucent frosted glass interface with subtle Gaussian blur and refined hairline borders.
           EOF
 
