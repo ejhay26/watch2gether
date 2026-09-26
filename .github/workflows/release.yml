@@ -95,7 +95,16 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
+          try {
+            choco install innosetup -y --no-progress
+          } catch {
+            Write-Host "Choco install encountered an issue, trying direct setup installer..."
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") -and -not (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe")) {
+            Write-Host "Downloading Inno Setup official installer..."
+            Invoke-WebRequest -Uri "https://files.jrsoftware.org/is/6/innosetup-6.3.3.exe" -OutFile "is_setup.exe"
+            Start-Process -FilePath ".\is_setup.exe" -ArgumentList "/VERYSILENT", "/ALLUSERS", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          }
 
       - name: Enable Windows Desktop in Flutter
         run: flutter config --enable-windows-desktop
@@ -137,6 +146,12 @@ jobs:
             "$env:ProgramFiles\7-Zip\7z.sfx"
           )
           $sfxModule = $sfxCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $sfxModule) {
+            Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2408-extra.7z" -OutFile "7z_extra.7z"
+            & 7z x "7z_extra.7z" -o"7z_extra" -y
+            $sfxModule = (Resolve-Path "7z_extra/7z.sfx").Path
+          }
 
           if ($sfxModule) {
             $sfxCfg = ";!@Install@!UTF-8!`r`nTitle=`"Watch2Gether Portable`"`r`nRunProgram=`"watch2gether.exe`"`r`n;!@InstallEnd@!`r`n"
