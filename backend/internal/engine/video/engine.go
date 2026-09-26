@@ -115,8 +115,8 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		}
 	}
 
-	// 3. Try dynamic archive ONLY if explicit archive request or strictly verified feature film collection
-	if title != "" && (strings.HasPrefix(serverID, "archive-") || strings.HasPrefix(mediaID, "archive-")) {
+	// 3. Fallback to dynamic archive for classic, vintage, and catalog films
+	if title != "" {
 		film, err := e.archiveProvider.SearchDynamicArchive(ctx, mediaID, title, "")
 		if err == nil && film != nil && len(film.Sources) > 0 {
 			sources := film.Sources

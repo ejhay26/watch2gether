@@ -36,7 +36,6 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
   List<Episode> _episodes = [];
   bool _isLoadingEpisodes = false;
   bool _isLaunchingPlayer = false;
-  bool _preferDub = false;
 
   @override
   void initState() {
@@ -104,19 +103,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
       final srvs = await _api.getServers(epId, title: widget.item.title);
       String srvId = epId;
       if (srvs.isNotEmpty) {
-        if (_preferDub) {
-          final dubSrv = srvs.firstWhere(
-            (s) => s.name.toUpperCase().contains('[DUB]'),
-            orElse: () => srvs.first,
-          );
-          srvId = dubSrv.id;
-        } else {
-          final subSrv = srvs.firstWhere(
-            (s) => s.name.toUpperCase().contains('[SUB]'),
-            orElse: () => srvs.first,
-          );
-          srvId = subSrv.id;
-        }
+        srvId = srvs.first.id;
       }
 
       final streamRes = await _api.getSources(srvId, title: widget.item.title);
@@ -276,7 +263,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
             initialRoomCode: roomCode,
             streamResult: streamRes,
             isPartySynced: isPartySynced,
-            initialAudioTrack: _preferDub ? '[DUB] English Dub' : (_isAnime ? '[SUB] Japanese Audio' : 'Original Audio (English)'),
+            initialAudioTrack: _isAnime ? '[SUB] Japanese Audio' : 'Original Audio (English)',
           ),
         ),
       );
@@ -489,61 +476,6 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Sub/Dub toggle for anime/series
-                        if (_isSeries) ...[
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceElevated,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.surfaceBorder),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                InkWell(
-                                  onTap: () => setState(() => _preferDub = false),
-                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: !_preferDub ? AppColors.accent : Colors.transparent,
-                                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
-                                    ),
-                                    child: Text(
-                                      'SUB (Japanese)',
-                                      style: TextStyle(
-                                        color: !_preferDub ? Colors.white : AppColors.textSecondary,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                InkWell(
-                                  onTap: () => setState(() => _preferDub = true),
-                                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: _preferDub ? AppColors.accent : Colors.transparent,
-                                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
-                                    ),
-                                    child: Text(
-                                      'DUB (English)',
-                                      style: TextStyle(
-                                        color: _preferDub ? Colors.white : AppColors.textSecondary,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
                         // Main Action Buttons Row (Responsive with Expanded to guarantee ZERO overflow)
                         Row(
                           children: [

@@ -83,6 +83,17 @@ func cleanTitleForSearchVariants(raw string) []string {
 	return list
 }
 
+func extractFlixHQSlug(link string) string {
+	re := regexp.MustCompile(`/(?:movie|series)/(.+?)(?:-\d+)?/?$`)
+	m := re.FindStringSubmatch(link)
+	if len(m) > 1 {
+		slug := m[1]
+		reID := regexp.MustCompile(`-\d+$`)
+		return strings.ToLower(reID.ReplaceAllString(slug, ""))
+	}
+	return ""
+}
+
 func cleanSymbols(s string) string {
 	symbols := []string{":", "-", "'", "\"", ".", "!", "?", ",", "(", ")", "[", "]"}
 	for _, sym := range symbols {
@@ -105,7 +116,6 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 		variants = []string{cleanTitle}
 	}
 
-	lowerTitle := strings.ToLower(cleanTitle)
 	queryWords := strings.Fields(strings.ToLower(cleanSymbols(cleanTitle)))
 
 	var candidateLinks []string
@@ -165,27 +175,99 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 		return nil
 	}
 
-	// Score candidates by match against title words
+	regNorm := regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	qNorm := strings.Trim(regNorm.ReplaceAllString(strings.ToLower(cleanTitle), "-"), "-")
+
+	junkKeywords := []string{
+		"making-of", "the-making-of", "behind-the-scenes", "featurette",
+		"trailer", "teaser", "review", "reaction", "interview", "bonus", "promotional",
+	}
+
 	type scoredLink struct {
 		url   string
 		score int
 	}
 	var scored []scoredLink
 	for _, link := range candidateLinks {
-		slug := strings.ToLower(link)
-		score := 0
-		for _, w := range queryWords {
-			if len(w) > 1 && strings.Contains(slug, w) {
-				score += 50
+		slug := extractFlixHQSlug(link)
+		if slug == "" {
+			continue
+		}
+
+		// Reject junk / behind the scenes / trailers
+		isJunk := false
+		for _, j := range junkKeywords {
+			if strings.Contains(slug, j) {
+				isJunk = true
+				break
 			}
 		}
-		if strings.Contains(lowerTitle, "rush hour") && strings.Contains(slug, "83419") {
-			score += 500
+		if isJunk {
+			continue
 		}
-		if strings.Contains(lowerTitle, "gretel") && strings.Contains(slug, "gretel-hansel-80591") {
-			score += 500
+
+		slugWords := strings.Split(slug, "-")
+
+		// Exact slug match is top winner
+		if slug == qNorm {
+			scored = append(scored, scoredLink{url: link, score: 3000})
+			continue
 		}
-		scored = append(scored, scoredLink{url: link, score: score})
+
+		// Reject if primary query words (len >= 3) are completely missing
+		missingWord := false
+		for _, qw := range queryWords {
+			if len(qw) >= 3 {
+				foundWord := false
+				for _, sw := range slugWords {
+					if sw == qw {
+						foundWord = true
+						break
+					}
+				}
+				if !foundWord {
+					missingWord = true
+					break
+				}
+			}
+		}
+		if missingWord {
+			continue
+		}
+
+		score := 100
+		for _, qw := range queryWords {
+			for _, sw := range slugWords {
+				if sw == qw {
+					score += 100
+				}
+			}
+		}
+
+		// Penalize if slug starts with an unrelated prefix word (e.g. "intimate-obsession" vs "obsession")
+		if len(slugWords) > len(queryWords) && len(queryWords) > 0 && slugWords[0] != queryWords[0] {
+			score -= 1000
+		}
+
+		// Penalize extra words not in query
+		extraCount := 0
+		for _, sw := range slugWords {
+			isQW := false
+			for _, qw := range queryWords {
+				if sw == qw {
+					isQW = true
+					break
+				}
+			}
+			if !isQW {
+				extraCount++
+			}
+		}
+		score -= extraCount * 150
+
+		if score > 0 {
+			scored = append(scored, scoredLink{url: link, score: score})
+		}
 	}
 
 	// Sort highest score first
@@ -314,6 +396,10 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 			res := &model.StreamResult{
 				Sources:   sources,
 				Subtitles: subtitles,
+				Headers: map[string]string{
+					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+					"Referer":    "https://flixhq.ws/",
+				},
 			}
 			p.cache.Store(cacheKey, res)
 			return res

@@ -594,7 +594,7 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 	}
 
 	var queries []string
-	collectionFilter := "AND collection:(feature_films OR classic_tv OR moviesandfilms OR SciFi_Horror OR Comedy_Films OR Film_Noir OR silent_films)"
+	collectionFilter := "AND collection:(feature_films OR classic_tv OR moviesandfilms OR SciFi_Horror OR Comedy_Films OR Film_Noir OR silent_films OR opensource_movies)"
 	if year != "" && len(year) == 4 {
 		queries = append(queries, fmt.Sprintf(`title:("%s") AND year:%s AND mediatype:movies %s`, cleanTitle, year, collectionFilter))
 		queries = append(queries, fmt.Sprintf(`title:("%s") AND mediatype:movies %s`, cleanTitle, collectionFilter))
@@ -658,15 +658,29 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 			}
 
 			// Verify title words exist
-			allWordsMatch := true
-			for _, w := range titleWords {
-				if len(w) > 2 && !strings.Contains(combinedText, w) {
-					allWordsMatch = false
-					break
+			cleanDocTitle := strings.ToLower(strings.TrimSpace(reg.ReplaceAllString(docTitle, " ")))
+			cleanQuery := strings.ToLower(cleanTitle)
+
+			// Clean multi-space
+			cleanDocWords := strings.Fields(cleanDocTitle)
+			cleanDocNorm := strings.Join(cleanDocWords, " ")
+
+			// Prefer exact title match or valid title prefix
+			if cleanDocNorm != cleanQuery && !strings.HasPrefix(cleanDocNorm, cleanQuery+" ") && !strings.HasPrefix(cleanDocNorm, cleanQuery+"(") {
+				allWordsMatch := true
+				for _, w := range titleWords {
+					if len(w) > 2 && !strings.Contains(combinedText, w) {
+						allWordsMatch = false
+						break
+					}
 				}
-			}
-			if !allWordsMatch {
-				continue
+				if !allWordsMatch {
+					continue
+				}
+				// Skip if document has unrelated prefix words
+				if len(cleanDocWords) > 0 && len(titleWords) > 0 && cleanDocWords[0] != titleWords[0] {
+					continue
+				}
 			}
 
 			// Query files metadata
@@ -696,7 +710,7 @@ func (p *ArchiveProvider) SearchDynamicArchive(ctx context.Context, mediaID stri
 				fNameLower := strings.ToLower(f.Name)
 				if strings.HasSuffix(fNameLower, ".mp4") || strings.HasSuffix(fNameLower, ".mkv") {
 					sz := parseArchiveSize(f.Size)
-					if sz > 250*1024*1024 && sz > bestSize {
+					if sz > 150*1024*1024 && sz > bestSize {
 						bestSize = sz
 						bestFile = f.Name
 					}
