@@ -139,27 +139,12 @@ jobs:
             }
           }
 
-          # 2. Package Portable Single Executable (.exe) via 7z SFX
-          $sfxCandidates = @(
-            "C:\Program Files\7-Zip\7z.sfx",
-            "C:\Program Files (x86)\7-Zip\7z.sfx",
-            "$env:ProgramFiles\7-Zip\7z.sfx"
-          )
-          $sfxModule = $sfxCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-          if (-not $sfxModule) {
-            Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2408-extra.7z" -OutFile "7z_extra.7z"
-            & 7z x "7z_extra.7z" -o"7z_extra" -y
-            $sfxModule = (Resolve-Path "7z_extra/7z.sfx").Path
-          }
-
-          if ($sfxModule) {
-            $sfxCfg = ";!@Install@!UTF-8!`r`nTitle=`"Watch2Gether Portable`"`r`nRunProgram=`"watch2gether.exe`"`r`n;!@InstallEnd@!`r`n"
-            Set-Content -Path "sfx_config.txt" -Value $sfxCfg -Encoding UTF8
-            & 7z a -mx=9 "app_data.7z" "./frontend/build/windows/x64/runner/Release/*"
-            cmd.exe /c "copy /b `"$sfxModule`" + sfx_config.txt + app_data.7z `"release-artifacts\watch2gether-windows-x64-portable-$tag.exe`""
-            Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
-          }
+          # 2. Package True Standalone Portable Executable (.exe) without extraction prompt
+          Push-Location "frontend/windows/portable"
+          Compress-Archive -Path "../../build/windows/x64/runner/Release/*" -DestinationPath "app.zip" -Force
+          go build -ldflags "-H=windowsgui -s -w" -o "../../../release-artifacts/watch2gether-windows-x64-portable-$tag.exe" main.go
+          Pop-Location
+          Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -344,28 +329,25 @@ jobs:
           REPO="${{ github.repository }}"
 
           cat << 'EOF' > release_notes.md
-          # 🎬 Watch2Gether Release
-          Official multiplatform release of Watch2Gether supporting Android, Windows, Linux, and macOS. All downloads are provided as pure native OS executables and packages without generic zip archives.
+### What's Changed in TAG_PLACEHOLDER
+  - **Elevated Floating Mini-Player & Z-Index Layering**: Lifted the picture-in-picture floating mini-player by 14px above the bottom frosted navigation bar to prevent UI overlap and occlusion.
+  - **Strict Movie vs. Anime Scraper Isolation & Exact Slug Matching**: Isolated movie entities (`tmdb-movie-`) strictly from the anime scraper pipeline and enforced exact slug match ranking, filtering out extraneous junk and documentary making-of featurettes.
+  - **Granular Per-Film Source Registry & Resolution Auditing**: Introduced a dedicated tracked source registry (`TrackedSourceRegistry`) and audit endpoint (`/api/v1/sources/tracked`) to pinpoint and verify exact sources for specific films without altering working titles.
+  - **Multi-Source Streaming Headers & CDN Delivery**: Injected browser headers (`User-Agent`, `Referer`) across HLS playlists and media segments, preventing CDN edge drops on Vidmoly/FlixHQ mirrors.
+  - **Removal of Misleading Audio/Dub Toggle**: Removed the `SUB (Japanese) / DUB (English)` toggle from media overview preview cards to eliminate false dub expectations on Western catalog films and live-action series.
+  - **True Standalone Windows Portable Executable**: Engineered a native silent launcher for Windows that opens WatchHub immediately upon double-click with zero extraction dialogs or prompts.
+  - **Multiplatform Native Packaging**: Automated building and distribution of native platform executables (`.apk`, `.exe`, `.dmg`, `.AppImage`) without generic archive wrappers.
 
-          ### 📥 Direct Application Downloads (Native OS Executables)
+### Direct Application Downloads
 
-          | Platform | Target Architecture | Direct Download Link | Format |
-          |:---:|:---|:---|:---:|
-          | 📱 **Android** | Android 7.0+ (ARM64 / ARMv7 / x86_64) | [**Download Android Universal APK**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-android-universal-TAG_PLACEHOLDER.apk) | `.apk` |
-          | 🪟 **Windows** | Windows 10 / 11 (Setup Installer) | [**Download Windows Setup Installer**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-setup-TAG_PLACEHOLDER.exe) | `.exe` |
-          | 🪟 **Windows** | Windows 10 / 11 (Portable Executable) | [**Download Windows Portable (.exe)**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-portable-TAG_PLACEHOLDER.exe) | `.exe` |
-          | 🍏 **macOS** | Apple Silicon & Intel Macs | [**Download macOS Universal DMG**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-macos-universal-TAG_PLACEHOLDER.dmg) | `.dmg` |
-          | 🐧 **Linux** | All Linux Distributions (x86_64) | [**Download Linux Standalone AppImage**](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-linux-x86_64-TAG_PLACEHOLDER.AppImage) | `.AppImage` |
-
-          ---
-
-          ### ✨ What's New
-          - **Multiplatform Native OS Packages**: Pure native executables and packages across Android (.apk), Windows (.exe installer & portable), Linux (.AppImage), and macOS Universal (.dmg). No generic zip or tar compression archives.
-          - **Elevated Floating Mini-Player**: Picture-in-picture miniplayer hovers cleanly above the floating navigation bar with zero occlusion.
-          - **Authentic English DUB & Multi-Language Subtitles**: Direct audio endpoint routing with support for English Dub and Japanese Sub, plus 9 subtitle languages (English, Spanish, French, German, Italian, Portuguese, Russian, Arabic).
-          - **Accurate Anime Series Episode Mapping**: Fixed slug resolution to prevent series IDs from resolving to unrelated shows and mapped canonical episode indices correctly.
-          - **Standardized Frosted Glass Theme**: Polished dark translucent frosted glass interface with subtle Gaussian blur and refined hairline borders.
-          EOF
+| Platform | Target Architecture | Direct Download Link | Format |
+|:---:|:---|:---|:---:|
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/android/android-original.svg" width="20" height="20" alt="Android" /> | Android 7.0+ (Universal) | [Download Android Universal APK](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-android-universal.apk) | `.apk` |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/windows11/windows11-original.svg" width="20" height="20" alt="Windows" /> | Windows 10 / 11 (Setup Installer) | [Download Windows Setup Installer](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-setup.exe) | `.exe` |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/windows11/windows11-original.svg" width="20" height="20" alt="Windows" /> | Windows 10 / 11 (Portable Executable) | [Download Windows Portable Executable](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-windows-x64-portable.exe) | `.exe` |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/apple/apple-original.svg" width="20" height="20" alt="macOS" /> | Apple Silicon & Intel Macs | [Download macOS Universal DMG](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-macos-universal.dmg) | `.dmg` |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/linux/linux-original.svg" width="20" height="20" alt="Linux" /> | All Linux Distros (x86_64) | [Download Linux Standalone AppImage](https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/watch2gether-linux-x86_64.AppImage) | `.AppImage` |
+EOF
           sed -i "s|REPO_PLACEHOLDER|${REPO}|g" release_notes.md
           sed -i "s|TAG_PLACEHOLDER|${TAG}|g" release_notes.md
 

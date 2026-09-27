@@ -11,17 +11,23 @@ import (
 type VideoEngine struct {
 	archiveProvider *ArchiveProvider
 	featureProvider *TMDBFeatureProvider
+	trackedSources  *TrackedSourceRegistry
 }
 
 func NewVideoEngine(tmdbKeys []string) *VideoEngine {
 	return &VideoEngine{
 		archiveProvider: NewArchiveProvider(),
 		featureProvider: NewTMDBFeatureProvider(tmdbKeys),
+		trackedSources:  NewTrackedSourceRegistry(),
 	}
 }
 
 func (e *VideoEngine) GetArchiveProvider() *ArchiveProvider {
 	return e.archiveProvider
+}
+
+func (e *VideoEngine) GetTrackedRegistry() *TrackedSourceRegistry {
+	return e.trackedSources
 }
 
 // GetServers generates distinct, dynamically labeled servers for this specific media item
@@ -32,6 +38,24 @@ func (e *VideoEngine) GetServers(episodeID string, title string) ([]model.Server
 		mediaID = strings.Split(episodeID, "-ep")[0]
 	} else if strings.Contains(episodeID, "-s") {
 		mediaID = strings.Split(episodeID, "-s")[0]
+	}
+
+	// 0. Check Tracked Pinned Sources
+	if pinned, found := e.trackedSources.GetPinned(title, mediaID); found {
+		var servers []model.Server
+		for i, src := range pinned.Sources {
+			servers = append(servers, model.Server{
+				ID:   fmt.Sprintf("%s-srv-%d", episodeID, i+1),
+				Name: fmt.Sprintf("%s (%s)", src.Quality, pinned.Title),
+			})
+		}
+		if len(servers) == 0 {
+			servers = append(servers, model.Server{
+				ID:   fmt.Sprintf("%s-srv-master", episodeID),
+				Name: fmt.Sprintf("Master Direct Stream (%s)", pinned.Title),
+			})
+		}
+		return servers, nil
 	}
 
 	film, found := e.archiveProvider.Match(mediaID, title)
@@ -87,16 +111,33 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 		mediaID = strings.Split(mediaID, "-s")[0]
 	}
 
+	// 0. Check Tracked Pinned Sources (Guarantees zero regression on verified titles)
+	if pinned, found := e.trackedSources.GetPinned(title, mediaID); found {
+		sources := pinned.Sources
+		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
+			sources = []model.Source{sources[1], sources[0]}
+		}
+		res := &model.StreamResult{
+			Sources:   sources,
+			Subtitles: pinned.Subtitles,
+			Headers:   pinned.Headers,
+		}
+		e.trackedSources.RecordResolution(title, mediaID, pinned.Provider, res)
+		return res, nil
+	}
+
 	// 1. Try pre-indexed curated public domain / classic films
 	if film, found := e.archiveProvider.Match(mediaID, title); found {
 		sources := film.Sources
 		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
 			sources = []model.Source{sources[1], sources[0]}
 		}
-		return &model.StreamResult{
+		res := &model.StreamResult{
 			Sources:   sources,
 			Subtitles: film.Subtitles,
-		}, nil
+		}
+		e.trackedSources.RecordResolution(title, mediaID, "ArchiveProvider (Pre-indexed)", res)
+		return res, nil
 	}
 
 	// 2. For modern/commercial films, resolve real multi-source feature streams FIRST (FlixHQ/Vidmoly/VidSrc)
@@ -107,11 +148,13 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 			if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
 				sources = []model.Source{sources[1], sources[0]}
 			}
-			return &model.StreamResult{
+			result := &model.StreamResult{
 				Sources:   sources,
 				Subtitles: res.Subtitles,
 				Headers:   res.Headers,
-			}, nil
+			}
+			e.trackedSources.RecordResolution(title, mediaID, "FlixHQ Feature Scraper", result)
+			return result, nil
 		}
 	}
 
@@ -123,10 +166,12 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 			if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
 				sources = []model.Source{sources[1], sources[0]}
 			}
-			return &model.StreamResult{
+			result := &model.StreamResult{
 				Sources:   sources,
 				Subtitles: film.Subtitles,
-			}, nil
+			}
+			e.trackedSources.RecordResolution(title, mediaID, "ArchiveOrg Dynamic Fallback", result)
+			return result, nil
 		}
 	}
 

@@ -28,6 +28,7 @@ func (h *MediaHandler) RegisterRoutes(router fiber.Router) {
 	api.Get("/episodes", h.GetEpisodes)
 	api.Get("/servers", h.GetServers)
 	api.Get("/sources", h.GetSources)
+	api.Get("/sources/tracked", h.GetTrackedSources)
 	api.Get("/subtitles/vtt", h.GetVTTSubtitles)
 }
 
@@ -216,4 +217,19 @@ Subtitles synchronized with multi-source video playback.
 `, title, strings.ToUpper(lang), title)
 
 	return c.SendString(vtt)
+}
+
+func (h *MediaHandler) GetTrackedSources(c *fiber.Ctx) error {
+	mgr, ok := h.scraper.(*scraper.Manager)
+	if !ok {
+		return c.JSON(fiber.Map{
+			"total":   0,
+			"sources": []interface{}{},
+		})
+	}
+	tracked := mgr.GetVideoEngine().GetTrackedRegistry().GetAllTracked()
+	return c.JSON(fiber.Map{
+		"total":   len(tracked),
+		"sources": tracked,
+	})
 }
