@@ -16,6 +16,12 @@ class Participant {
       isHost: json['is_host'] ?? false,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'username': username,
+    'is_host': isHost,
+  };
 }
 
 class ChatMessage {
@@ -44,6 +50,14 @@ class ChatMessage {
           : DateTime.now(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'user_id': userId,
+    'username': username,
+    'message': message,
+    'timestamp': timestamp.toIso8601String(),
+  };
 }
 
 class RoomStateData {

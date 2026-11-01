@@ -120,14 +120,20 @@ class ActivePartyCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'WATCH PARTY ACTIVE',
-                      style: TextStyle(
+                    Text(
+                      roomService.isOnlineCloud ? 'ONLINE CLOUD PARTY' : 'LOCAL LAN PARTY',
+                      style: const TextStyle(
                         color: Colors.greenAccent,
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.0,
                       ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      roomService.isOnlineCloud ? Icons.public_rounded : Icons.wifi_rounded,
+                      color: Colors.greenAccent,
+                      size: 13,
                     ),
                     const Spacer(),
                     Container(
@@ -156,7 +162,7 @@ class ActivePartyCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
 
-                // 2. Room Code & Direct IP Box
+                // 2. Room Code & Connection Box
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
@@ -198,35 +204,68 @@ class ActivePartyCard extends StatelessWidget {
                         onPressed: () => _copy(context, code, 'Room Code'),
                       ),
                       const Spacer(),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          const Text(
-                            'LAN ADDRESS',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.8,
+                      if (roomService.isOnlineCloud) ...[
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              'WORLDWIDE MESH',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.8,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '$hostIp:8888',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontFamily: 'monospace',
+                            SizedBox(height: 2),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.cloud_done_rounded, color: Colors.greenAccent, size: 14),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Global Edge Active',
+                                  style: TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: 'Copy LAN IP',
-                        icon: const Icon(Icons.link_rounded, color: Colors.white70, size: 18),
-                        onPressed: () => _copy(context, '$hostIp:8888', 'LAN Address'),
-                      ),
+                          ],
+                        ),
+                      ] else ...[
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              'LAN ADDRESS',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$hostIp:8888',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: 'Copy LAN IP',
+                          icon: const Icon(Icons.link_rounded, color: Colors.white70, size: 18),
+                          onPressed: () => _copy(context, '$hostIp:8888', 'LAN Address'),
+                        ),
+                      ],
                     ],
                   ),
                 ),

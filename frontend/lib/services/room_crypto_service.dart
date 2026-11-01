@@ -50,11 +50,15 @@ class RoomCryptoService {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
         if (decoded['w2g_enc'] == true && decoded['data'] != null) {
-          final key = _deriveKey(roomCode);
-          final iv = _deriveIV(roomCode);
-          final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-          final decrypted = encrypter.decrypt64(decoded['data'] as String, iv: iv);
-          return jsonDecode(decrypted) as Map<String, dynamic>;
+          try {
+            final key = _deriveKey(roomCode);
+            final iv = _deriveIV(roomCode);
+            final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+            final decrypted = encrypter.decrypt64(decoded['data'] as String, iv: iv);
+            return jsonDecode(decrypted) as Map<String, dynamic>;
+          } catch (_) {
+            return {};
+          }
         }
         return decoded;
       }

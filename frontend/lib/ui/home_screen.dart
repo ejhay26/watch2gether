@@ -294,6 +294,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final controller = TextEditingController();
     final nameController = TextEditingController(text: localStore.username);
     bool isCreating = false;
+    bool isLanMode = false;
 
     showGeneralDialog(
       context: context,
@@ -332,11 +333,82 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  "Watch movies in perfect sync with friends over your local network. No accounts required — encrypted with AES-256.",
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.4),
+                // Mode Toggle Bar (Online Worldwide vs Local LAN)
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0C0E1A),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => isLanMode = false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: !isLanMode ? AppColors.accent : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.public_rounded, size: 15, color: !isLanMode ? Colors.black : Colors.white70),
+                                const SizedBox(width: 6),
+                                Text(
+                                  "Worldwide Cloud",
+                                  style: TextStyle(
+                                    color: !isLanMode ? Colors.black : Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => isLanMode = true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isLanMode ? AppColors.accent : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.wifi_rounded, size: 15, color: isLanMode ? Colors.black : Colors.white70),
+                                const SizedBox(width: 6),
+                                Text(
+                                  "Local LAN",
+                                  style: TextStyle(
+                                    color: isLanMode ? Colors.black : Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+
+                Text(
+                  !isLanMode
+                      ? "Watch together with friends anywhere in the world on 4G/5G or Wi-Fi using short 6-character room codes. Encrypted end-to-end with AES-256."
+                      : "Direct peer-to-peer playback sync over your local Wi-Fi network without requiring internet. Encrypted with AES-256.",
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.0, height: 1.35),
+                ),
+                const SizedBox(height: 14),
 
                 // Display Name Input Field
                 const Text(
@@ -362,10 +434,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
 
-                // Host LAN Network Indicator
-                if (roomService.availableHostIps.isNotEmpty) ...[
+                // Host LAN Network Indicator (Shown only in LAN mode)
+                if (isLanMode && roomService.availableHostIps.isNotEmpty) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
@@ -400,9 +472,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   icon: isCreating
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                      : const Icon(Icons.add_circle_outline_rounded, size: 20),
+                      : Icon(!isLanMode ? Icons.public_rounded : Icons.add_circle_outline_rounded, size: 20),
                   label: Text(
-                    isCreating ? "Initializing Encrypted Party..." : "Host New Watch Party",
+                    isCreating
+                        ? "Initializing Encrypted Party..."
+                        : (!isLanMode ? "Host Worldwide Party" : "Host Local LAN Party"),
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   onPressed: isCreating ? null : () async {
@@ -415,6 +489,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       username: customName.isNotEmpty ? customName : localStore.username,
                       userId: localStore.peerId,
                       title: "Watch Party",
+                      forceLan: isLanMode,
                     );
                     if (ctx.mounted) Navigator.of(ctx).pop();
                     if (code != null && mounted) {
@@ -466,7 +541,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                   decoration: InputDecoration(
-                    hintText: "CODE OR IP (e.g. 1HGIKAE)",
+                    hintText: "ROOM CODE (e.g. SKY-942) OR IP",
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 13, letterSpacing: 0.5),
                     counterText: "",
                     prefixIcon: const Icon(Icons.pin_rounded, color: AppColors.textSecondary, size: 18),
                     filled: true,
@@ -1013,7 +1089,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         AppToast.show(
           context,
-          "Could not connect to host. Make sure both devices are on the same Wi-Fi network and check code.",
+          "Could not connect to room. Verify the room code and internet/Wi-Fi connection.",
           type: ToastType.error,
           duration: const Duration(seconds: 4),
         );

@@ -1,18 +1,26 @@
 import 'package:flutter/foundation.dart';
 import '../models/room_models.dart';
 import 'local_store_service.dart';
+import 'online_room_service.dart';
 import 'p2p_mesh_service.dart';
 
+enum RoomEngineMode {
+  onlineCloud,
+  localLan,
+}
+
 class RoomService extends ChangeNotifier {
+  final OnlineRoomService _online = OnlineRoomService();
   final P2PMeshService _mesh = P2PMeshService();
 
+  RoomEngineMode _activeEngine = RoomEngineMode.onlineCloud;
   String? _currentRoomId;
   String? _userId;
   String? _username;
   RoomStateData? _state;
   bool _isConnected = false;
 
-  // Playback sync event callbacks
+  // Playback sync event callbacks consumed by PlayerScreen
   ValueChanged<RoomStateData>? onRoomStateReceived;
   Function(double position, int executeAtMs)? onPlayReceived;
   Function(double position)? onPauseReceived;
@@ -26,81 +34,193 @@ class RoomService extends ChangeNotifier {
   String? get username => _username ?? LocalStoreService().username;
   RoomStateData? get state => _state;
   bool get isConnected => _isConnected;
-  bool get isHost => _mesh.isHost;
+  RoomEngineMode get activeEngine => _activeEngine;
+  bool get isOnlineCloud => _activeEngine == RoomEngineMode.onlineCloud;
+  bool get isHost => _activeEngine == RoomEngineMode.onlineCloud ? _online.isHost : _mesh.isHost;
   double get currentPosition => _state?.currentPosition ?? 0.0;
   String? get hostIpAddress => _mesh.localIpAddress;
   List<String> get availableHostIps => _mesh.availableIps;
 
   RoomService() {
-    _initMeshHooks();
+    _initEngineHooks();
   }
 
-  void _initMeshHooks() {
+  void _initEngineHooks() {
+    // 1. Online Cloud Realtime hooks (Supabase Realtime)
+    _online.onRoomStateChanged = (roomState) {
+      if (_activeEngine == RoomEngineMode.onlineCloud) {
+        _state = roomState;
+        _currentRoomId = roomState.roomId;
+        _isConnected = true;
+        notifyListeners();
+        onRoomStateReceived?.call(roomState);
+      }
+    };
+
+    _online.onPlayReceived = (position, executeAtMs) {
+      if (_activeEngine == RoomEngineMode.onlineCloud) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            isPlaying: true,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onPlayReceived?.call(position, executeAtMs);
+      }
+    };
+
+    _online.onPauseReceived = (position) {
+      if (_activeEngine == RoomEngineMode.onlineCloud) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            isPlaying: false,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onPauseReceived?.call(position);
+      }
+    };
+
+    _online.onSeekReceived = (position, executeAtMs) {
+      if (_activeEngine == RoomEngineMode.onlineCloud) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onSeekReceived?.call(position, executeAtMs);
+      }
+    };
+
+    _online.onMediaChanged = (mediaId, title, streamUrl, episodeId, headers) {
+      if (_activeEngine == RoomEngineMode.onlineCloud) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            mediaId: mediaId,
+            title: title,
+            streamUrl: streamUrl,
+            episodeId: episodeId,
+            headers: headers,
+            playbackPosition: 0.0,
+            isPlaying: true,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onMediaChangedReceived?.call(mediaId, title, streamUrl);
+        if (localActiveMediaId != mediaId) {
+          onPartyPlayPrompt?.call(mediaId, title, streamUrl, episodeId, headers);
+        }
+      }
+    };
+
+    _online.onChatReceived = (chatMsg) {
+      if (_activeEngine == RoomEngineMode.onlineCloud && _state != null) {
+        final updatedChat = List<ChatMessage>.from(_state!.recentChat)..add(chatMsg);
+        _state = _state!.copyWith(recentChat: updatedChat);
+        notifyListeners();
+      }
+    };
+
+    _online.onUserJoined = (participant) {
+      if (_activeEngine == RoomEngineMode.onlineCloud && _state != null) {
+        final updatedParts = List<Participant>.from(_state!.participants.where((p) => p.id != participant.id))
+          ..add(participant);
+        _state = _state!.copyWith(participants: updatedParts);
+        notifyListeners();
+      }
+    };
+
+    _online.onUserLeft = (leftId) {
+      if (_activeEngine == RoomEngineMode.onlineCloud && _state != null) {
+        final updatedParts = _state!.participants.where((p) => p.id != leftId).toList();
+        _state = _state!.copyWith(participants: updatedParts);
+        notifyListeners();
+      }
+    };
+
+    // 2. Local LAN Mesh hooks (Direct Wi-Fi / LAN)
     _mesh.onRoomStateChanged = (roomState) {
-      _state = roomState;
-      _currentRoomId = roomState.roomId;
-      _isConnected = true;
-      notifyListeners();
-      onRoomStateReceived?.call(roomState);
+      if (_activeEngine == RoomEngineMode.localLan) {
+        _state = roomState;
+        _currentRoomId = roomState.roomId;
+        _isConnected = true;
+        notifyListeners();
+        onRoomStateReceived?.call(roomState);
+      }
     };
 
     _mesh.onPlayReceived = (position, executeAtMs) {
-      if (_state != null) {
-        _state = _state!.copyWith(
-          playbackPosition: position,
-          isPlaying: true,
-          lastUpdated: DateTime.now(),
-        );
-        notifyListeners();
+      if (_activeEngine == RoomEngineMode.localLan) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            isPlaying: true,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onPlayReceived?.call(position, executeAtMs);
       }
-      onPlayReceived?.call(position, executeAtMs);
     };
 
     _mesh.onPauseReceived = (position) {
-      if (_state != null) {
-        _state = _state!.copyWith(
-          playbackPosition: position,
-          isPlaying: false,
-          lastUpdated: DateTime.now(),
-        );
-        notifyListeners();
+      if (_activeEngine == RoomEngineMode.localLan) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            isPlaying: false,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onPauseReceived?.call(position);
       }
-      onPauseReceived?.call(position);
     };
 
     _mesh.onSeekReceived = (position, executeAtMs) {
-      if (_state != null) {
-        _state = _state!.copyWith(
-          playbackPosition: position,
-          lastUpdated: DateTime.now(),
-        );
-        notifyListeners();
+      if (_activeEngine == RoomEngineMode.localLan) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            playbackPosition: position,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onSeekReceived?.call(position, executeAtMs);
       }
-      onSeekReceived?.call(position, executeAtMs);
     };
 
     _mesh.onMediaChanged = (mediaId, title, streamUrl, episodeId, headers) {
-      if (_state != null) {
-        _state = _state!.copyWith(
-          mediaId: mediaId,
-          title: title,
-          streamUrl: streamUrl,
-          episodeId: episodeId,
-          headers: headers,
-          playbackPosition: 0.0,
-          isPlaying: true,
-          lastUpdated: DateTime.now(),
-        );
-        notifyListeners();
-      }
-      onMediaChangedReceived?.call(mediaId, title, streamUrl);
-      if (localActiveMediaId != mediaId) {
-        onPartyPlayPrompt?.call(mediaId, title, streamUrl, episodeId, headers);
+      if (_activeEngine == RoomEngineMode.localLan) {
+        if (_state != null) {
+          _state = _state!.copyWith(
+            mediaId: mediaId,
+            title: title,
+            streamUrl: streamUrl,
+            episodeId: episodeId,
+            headers: headers,
+            playbackPosition: 0.0,
+            isPlaying: true,
+            lastUpdated: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        onMediaChangedReceived?.call(mediaId, title, streamUrl);
+        if (localActiveMediaId != mediaId) {
+          onPartyPlayPrompt?.call(mediaId, title, streamUrl, episodeId, headers);
+        }
       }
     };
 
     _mesh.onChatReceived = (chatMsg) {
-      if (_state != null) {
+      if (_activeEngine == RoomEngineMode.localLan && _state != null) {
         final updatedChat = List<ChatMessage>.from(_state!.recentChat)..add(chatMsg);
         _state = _state!.copyWith(recentChat: updatedChat);
         notifyListeners();
@@ -108,15 +228,16 @@ class RoomService extends ChangeNotifier {
     };
 
     _mesh.onUserJoined = (participant) {
-      if (_state != null) {
-        final updatedParts = List<Participant>.from(_state!.participants.where((p) => p.id != participant.id))..add(participant);
+      if (_activeEngine == RoomEngineMode.localLan && _state != null) {
+        final updatedParts = List<Participant>.from(_state!.participants.where((p) => p.id != participant.id))
+          ..add(participant);
         _state = _state!.copyWith(participants: updatedParts);
         notifyListeners();
       }
     };
 
     _mesh.onUserLeft = (leftId) {
-      if (_state != null) {
+      if (_activeEngine == RoomEngineMode.localLan && _state != null) {
         final updatedParts = _state!.participants.where((p) => p.id != leftId).toList();
         _state = _state!.copyWith(participants: updatedParts);
         notifyListeners();
@@ -126,33 +247,58 @@ class RoomService extends ChangeNotifier {
 
   void setHostIp(String ip) {
     _mesh.setCustomHostIp(ip);
-    if (_mesh.activeRoomCode != null) {
+    if (_activeEngine == RoomEngineMode.localLan && _mesh.activeRoomCode != null) {
       _currentRoomId = _mesh.activeRoomCode;
       notifyListeners();
     }
   }
 
-  Future<String?> startParty({String? username, String? userId, String title = "Watch Party"}) async {
+  /// Start a Watch Party. By default hosts an Online Worldwide room (Supabase Realtime).
+  /// If [forceLan] is true, hosts directly on the physical LAN adapter.
+  Future<String?> startParty({
+    String? username,
+    String? userId,
+    String title = "Watch Party",
+    bool forceLan = false,
+  }) async {
     final uname = username ?? _username ?? LocalStoreService().username;
     final uid = userId ?? _userId ?? LocalStoreService().peerId;
     _username = uname;
     _userId = uid;
 
-    final code = await _mesh.hostDirectParty(
-      hostUserId: uid,
-      hostUsername: uname,
-      title: title,
-    );
-
-    if (code != null) {
-      _currentRoomId = code;
-      _state = _mesh.state;
-      _isConnected = true;
-      notifyListeners();
+    if (forceLan) {
+      _activeEngine = RoomEngineMode.localLan;
+      final code = await _mesh.hostDirectParty(
+        hostUserId: uid,
+        hostUsername: uname,
+        title: title,
+      );
+      if (code != null) {
+        _currentRoomId = code;
+        _state = _mesh.state;
+        _isConnected = true;
+        notifyListeners();
+      }
+      return code;
+    } else {
+      _activeEngine = RoomEngineMode.onlineCloud;
+      final code = await _online.hostRoom(
+        userId: uid,
+        username: uname,
+        title: title,
+      );
+      if (code != null) {
+        _currentRoomId = code;
+        _state = _online.state;
+        _isConnected = true;
+        notifyListeners();
+      }
+      return code;
     }
-    return code;
   }
 
+  /// Join a Watch Party.
+  /// Automatically detects whether the input is a LAN IP / LAN code or a Worldwide Online code.
   Future<bool> joinParty(String code, {String? username, String? userId}) async {
     final cleanCode = code.trim().toUpperCase();
     if (cleanCode.isEmpty) return false;
@@ -162,20 +308,43 @@ class RoomService extends ChangeNotifier {
     _username = uname;
     _userId = uid;
 
-    final success = await _mesh.joinParty(
-      codeOrAddress: cleanCode,
-      userId: uid,
-      username: uname,
-    );
+    // Detect if this is a LAN IP or explicit LAN address
+    final isLan = cleanCode.contains('.') ||
+        cleanCode.contains(':') ||
+        cleanCode.startsWith('LAN-') ||
+        (cleanCode.length == 7 && RegExp(r'^[0-9A-Z]{7}$').hasMatch(cleanCode) && P2PMeshService.decodeCodeToIp(cleanCode)?.contains('.') == true);
 
-    if (success) {
-      _currentRoomId = cleanCode;
-      _isConnected = true;
-      _state = _mesh.state;
-      notifyListeners();
-      return true;
+    if (isLan) {
+      _activeEngine = RoomEngineMode.localLan;
+      final success = await _mesh.joinParty(
+        codeOrAddress: cleanCode,
+        userId: uid,
+        username: uname,
+      );
+      if (success) {
+        _currentRoomId = cleanCode;
+        _isConnected = true;
+        _state = _mesh.state;
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } else {
+      _activeEngine = RoomEngineMode.onlineCloud;
+      final success = await _online.joinRoom(
+        roomCode: cleanCode,
+        userId: uid,
+        username: uname,
+      );
+      if (success) {
+        _currentRoomId = cleanCode;
+        _isConnected = true;
+        _state = _online.state;
+        notifyListeners();
+        return true;
+      }
+      return false;
     }
-    return false;
   }
 
   Future<void> connect({
@@ -192,7 +361,12 @@ class RoomService extends ChangeNotifier {
     _username = clean;
     LocalStoreService().updateUsername(clean);
     final uid = _userId ?? LocalStoreService().peerId;
-    _mesh.sendRename(clean, userId: uid);
+
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendRename(clean, userId: uid);
+    } else {
+      _mesh.sendRename(clean, userId: uid);
+    }
 
     if (_state != null) {
       final updatedParts = _state!.participants.map((p) {
@@ -218,7 +392,11 @@ class RoomService extends ChangeNotifier {
         lastUpdated: DateTime.now(),
       );
     }
-    _mesh.sendPlay(position);
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendPlay(position);
+    } else {
+      _mesh.sendPlay(position);
+    }
   }
 
   void sendPause(double position) {
@@ -229,7 +407,11 @@ class RoomService extends ChangeNotifier {
         lastUpdated: DateTime.now(),
       );
     }
-    _mesh.sendPause(position);
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendPause(position);
+    } else {
+      _mesh.sendPause(position);
+    }
   }
 
   void sendSeek(double position) {
@@ -239,23 +421,43 @@ class RoomService extends ChangeNotifier {
         lastUpdated: DateTime.now(),
       );
     }
-    _mesh.sendSeek(position);
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendSeek(position);
+    } else {
+      _mesh.sendSeek(position);
+    }
   }
 
-  void sendChangeMedia(String mediaId, String title, String streamUrl, String episodeId, {Map<String, String>? headers}) {
-    _mesh.sendChangeMedia(mediaId, title, streamUrl, episodeId, headers: headers);
+  void sendChangeMedia(
+    String mediaId,
+    String title,
+    String streamUrl,
+    String episodeId, {
+    Map<String, String>? headers,
+  }) {
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendChangeMedia(mediaId, title, streamUrl, episodeId, headers: headers);
+    } else {
+      _mesh.sendChangeMedia(mediaId, title, streamUrl, episodeId, headers: headers);
+    }
   }
 
   void sendChat(String message) {
     if (message.trim().isEmpty) return;
     final uid = _userId ?? LocalStoreService().peerId;
     final uname = _username ?? LocalStoreService().username;
-    _mesh.sendChat(message, userId: uid, username: uname);
+
+    if (_activeEngine == RoomEngineMode.onlineCloud) {
+      _online.sendChat(message, userId: uid, username: uname);
+    } else {
+      _mesh.sendChat(message, userId: uid, username: uname);
+    }
   }
 
   void requestSync() {}
 
   void disconnect() {
+    _online.disconnect();
     _mesh.disconnect();
     _isConnected = false;
     _state = null;
