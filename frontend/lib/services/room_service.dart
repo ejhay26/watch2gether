@@ -23,12 +23,13 @@ class RoomService extends ChangeNotifier {
 
   bool get isInParty => _isConnected && _currentRoomId != null;
   String? get currentRoomId => _currentRoomId;
-  String? get username => _username;
+  String? get username => _username ?? LocalStoreService().username;
   RoomStateData? get state => _state;
   bool get isConnected => _isConnected;
   bool get isHost => _mesh.isHost;
   double get currentPosition => _state?.currentPosition ?? 0.0;
   String? get hostIpAddress => _mesh.localIpAddress;
+  List<String> get availableHostIps => _mesh.availableIps;
 
   RoomService() {
     _initMeshHooks();
@@ -87,13 +88,13 @@ class RoomService extends ChangeNotifier {
           episodeId: episodeId,
           headers: headers,
           playbackPosition: 0.0,
-          isPlaying: false,
+          isPlaying: true,
           lastUpdated: DateTime.now(),
         );
         notifyListeners();
       }
       onMediaChangedReceived?.call(mediaId, title, streamUrl);
-      if (localActiveMediaId != mediaId && onMediaChangedReceived == null) {
+      if (localActiveMediaId != mediaId) {
         onPartyPlayPrompt?.call(mediaId, title, streamUrl, episodeId, headers);
       }
     };
@@ -121,6 +122,14 @@ class RoomService extends ChangeNotifier {
         notifyListeners();
       }
     };
+  }
+
+  void setHostIp(String ip) {
+    _mesh.setCustomHostIp(ip);
+    if (_mesh.activeRoomCode != null) {
+      _currentRoomId = _mesh.activeRoomCode;
+      notifyListeners();
+    }
   }
 
   Future<String?> startParty({String? username, String? userId, String title = "Watch Party"}) async {
@@ -177,6 +186,26 @@ class RoomService extends ChangeNotifier {
     await joinParty(roomId, userId: userId, username: username);
   }
 
+  void renameUser(String newName) {
+    final clean = newName.trim();
+    if (clean.isEmpty) return;
+    _username = clean;
+    LocalStoreService().updateUsername(clean);
+    final uid = _userId ?? LocalStoreService().peerId;
+    _mesh.sendRename(clean, userId: uid);
+
+    if (_state != null) {
+      final updatedParts = _state!.participants.map((p) {
+        if (p.id == uid) {
+          return Participant(id: p.id, username: clean, isHost: p.isHost);
+        }
+        return p;
+      }).toList();
+      _state = _state!.copyWith(participants: updatedParts);
+      notifyListeners();
+    }
+  }
+
   void leaveParty() {
     disconnect();
   }
@@ -224,9 +253,7 @@ class RoomService extends ChangeNotifier {
     _mesh.sendChat(message, userId: uid, username: uname);
   }
 
-  void requestSync() {
-    // When peer connects, sync is sent automatically by host
-  }
+  void requestSync() {}
 
   void disconnect() {
     _mesh.disconnect();

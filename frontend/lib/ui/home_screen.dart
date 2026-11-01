@@ -16,8 +16,10 @@ import '../services/auth_service.dart';
 import '../services/local_store_service.dart';
 import '../services/p2p_mesh_service.dart';
 import '../services/playback_service.dart';
+import 'components/active_party_card.dart';
 import 'components/app_toast.dart';
 import 'components/liquid_glass.dart';
+import 'components/profile_name_modal.dart';
 import 'auth/auth_modal.dart';
 import 'auth/profile_dialog.dart';
 import 'media/media_overview_modal.dart';
@@ -288,8 +290,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showPartyDialog() {
     final roomService = Provider.of<RoomService>(context, listen: false);
-    final authService = Provider.of<AuthService>(context, listen: false);
+    final localStore = Provider.of<LocalStoreService>(context, listen: false);
     final controller = TextEditingController();
+    final nameController = TextEditingController(text: localStore.username);
     bool isCreating = false;
 
     showGeneralDialog(
@@ -320,113 +323,181 @@ class _HomeScreenState extends State<HomeScreen> {
               Icon(Icons.groups_rounded, color: AppColors.accent, size: 22),
               SizedBox(width: 10),
               Text("Watch Party", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              Spacer(),
+              Icon(Icons.lock_rounded, color: Colors.greenAccent, size: 16),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                "Parties stay connected across films like Roblox groups. When anyone starts a film, everyone gets prompted to join.",
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.4),
-              ),
-              const SizedBox(height: 20),
-
-              // Start Party Button
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  "Watch movies in perfect sync with friends over your local network. No accounts required — encrypted with AES-256.",
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.4),
                 ),
-                icon: isCreating
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                    : const Icon(Icons.add_circle_outline_rounded, size: 20),
-                label: Text(
-                  isCreating ? "Initializing Party..." : "Start New Watch Party",
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                onPressed: isCreating ? null : () async {
-                  setDialogState(() => isCreating = true);
-                  final code = await roomService.startParty(
-                    username: authService.username,
-                    userId: authService.userId,
-                    title: "Watch Party",
-                  );
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                  if (code != null && mounted) {
-                    AppToast.show(
-                      context,
-                      "Party $code created",
-                      type: ToastType.success,
-                    );
-                  }
-                },
-              ),
+                const SizedBox(height: 16),
 
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.white12)),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 10),
-                      child: Text("OR JOIN PARTY", style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                // Display Name Input Field
+                const Text(
+                  "YOUR DISPLAY NAME",
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nameController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.accent, size: 18),
+                    hintText: "Enter your name",
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: const Color(0xFF0F111D),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Host LAN Network Indicator
+                if (roomService.availableHostIps.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F111D),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white10),
                     ),
-                    Expanded(child: Divider(color: Colors.white12)),
-                  ],
-                ),
-              ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.wifi_rounded, color: Colors.greenAccent, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Physical LAN IP: ${roomService.hostIpAddress ?? roomService.availableHostIps.first}",
+                            style: const TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
 
-              // Join Code Input with Enter submit
-              TextField(
-                controller: controller,
-                autofocus: false,
-                textCapitalization: TextCapitalization.characters,
-                maxLength: 24,
-                textInputAction: TextInputAction.go,
-                onSubmitted: (_) async {
-                  final code = controller.text.trim().toUpperCase();
-                  if (code.isNotEmpty) {
-                    Navigator.of(ctx).pop();
-                    await _handleJoinPartyCode(code);
-                  }
-                },
-                style: const TextStyle(
-                  color: AppColors.accent,
-                  fontSize: 16,
-                  letterSpacing: 2.0,
-                  fontWeight: FontWeight.bold,
+                // Start Party Button
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: isCreating
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                      : const Icon(Icons.add_circle_outline_rounded, size: 20),
+                  label: Text(
+                    isCreating ? "Initializing Encrypted Party..." : "Host New Watch Party",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  onPressed: isCreating ? null : () async {
+                    final customName = nameController.text.trim();
+                    if (customName.isNotEmpty) {
+                      localStore.updateUsername(customName);
+                    }
+                    setDialogState(() => isCreating = true);
+                    final code = await roomService.startParty(
+                      username: customName.isNotEmpty ? customName : localStore.username,
+                      userId: localStore.peerId,
+                      title: "Watch Party",
+                    );
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    if (code != null && mounted) {
+                      AppToast.show(
+                        context,
+                        "Party created! Share code: $code",
+                        type: ToastType.success,
+                      );
+                    }
+                  },
                 ),
-                decoration: InputDecoration(
-                  hintText: "ENTER CODE OR IP",
-                  counterText: "",
-                  prefixIcon: const Icon(Icons.pin_rounded, color: AppColors.textSecondary, size: 18),
-                  filled: true,
-                  fillColor: const Color(0xFF0F111D),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.white12)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text("OR JOIN PARTY", style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                      ),
+                      Expanded(child: Divider(color: Colors.white12)),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white24),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+
+                // Join Code or IP Input
+                TextField(
+                  controller: controller,
+                  autofocus: false,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 28,
+                  textInputAction: TextInputAction.go,
+                  onSubmitted: (_) async {
+                    final customName = nameController.text.trim();
+                    if (customName.isNotEmpty) {
+                      localStore.updateUsername(customName);
+                    }
+                    final code = controller.text.trim().toUpperCase();
+                    if (code.isNotEmpty) {
+                      Navigator.of(ctx).pop();
+                      await _handleJoinPartyCode(code);
+                    }
+                  },
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontSize: 15,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: "CODE OR IP (e.g. 1HGIKAE)",
+                    counterText: "",
+                    prefixIcon: const Icon(Icons.pin_rounded, color: AppColors.textSecondary, size: 18),
+                    filled: true,
+                    fillColor: const Color(0xFF0F111D),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
-                child: const Text("Join with Code or IP", style: TextStyle(fontWeight: FontWeight.bold)),
-                onPressed: () async {
-                  final code = controller.text.trim().toUpperCase();
-                  if (code.isNotEmpty) {
-                    Navigator.of(ctx).pop();
-                    await _handleJoinPartyCode(code);
-                  }
-                },
-              ),
-            ],
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text("Join Party", style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () async {
+                    final customName = nameController.text.trim();
+                    if (customName.isNotEmpty) {
+                      localStore.updateUsername(customName);
+                    }
+                    final code = controller.text.trim().toUpperCase();
+                    if (code.isNotEmpty) {
+                      Navigator.of(ctx).pop();
+                      await _handleJoinPartyCode(code);
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -924,23 +995,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _handleJoinPartyCode(String code) async {
     final roomService = Provider.of<RoomService>(context, listen: false);
-    final authService = Provider.of<AuthService>(context, listen: false);
+    final localStore = Provider.of<LocalStoreService>(context, listen: false);
+
+    AppToast.show(
+      context,
+      "Connecting to party $code...",
+      type: ToastType.info,
+    );
 
     final success = await roomService.joinParty(
       code,
-      username: authService.username,
-      userId: authService.userId,
+      username: localStore.username,
+      userId: localStore.peerId,
     );
 
     if (!success) {
       if (mounted) {
         AppToast.show(
           context,
-          "Party not found or expired",
+          "Could not connect to host. Make sure both devices are on the same Wi-Fi network and check code.",
           type: ToastType.error,
+          duration: const Duration(seconds: 4),
         );
       }
       return;
+    }
+
+    if (mounted) {
+      AppToast.show(
+        context,
+        "Connected to party! Live sync active.",
+        type: ToastType.success,
+      );
     }
 
     final room = roomService.state;
@@ -1707,58 +1793,44 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildPartyWidget(context, isMobile),
             const SizedBox(width: 8),
 
-            // User Account Button
-            if (auth.isAuthenticated)
-              InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => ProfileDialog.show(context),
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.surfaceBorder),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircleAvatar(
-                        radius: 12,
-                        backgroundColor: AppColors.accent,
-                        child: Text(
-                          (auth.username ?? 'U')[0].toUpperCase(),
-                          style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+            // Sovereign User Profile & Display Name Button (No Account Required)
+            Consumer<LocalStoreService>(
+              builder: (context, localStore, _) {
+                final uname = localStore.username;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => ProfileNameModal.show(context),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.surfaceBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircleAvatar(
+                          radius: 12,
+                          backgroundColor: AppColors.accent,
+                          child: Text(
+                            uname.isNotEmpty ? uname[0].toUpperCase() : 'U',
+                            style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
-                      if (!isMobile) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          auth.username ?? 'User',
-                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                        ),
+                        if (!isMobile) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            uname,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              )
-            else if (isMobile)
-              IconButton(
-                icon: const Icon(Icons.person_outline, color: Colors.white, size: 20),
-                tooltip: 'Sign In',
-                onPressed: () => AuthModal.show(context),
-              )
-            else
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.surfaceElevated,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                ),
-                icon: const Icon(Icons.person_outline, size: 18),
-                label: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                onPressed: () => AuthModal.show(context),
-              ),
+                );
+              },
+            ),
 
             SizedBox(width: isMobile ? 12 : 16),
           ],
@@ -1811,10 +1883,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-                // Active Party Stream Rejoin Banner
+                // Active Party Stream Card & Live Members
                 Consumer<RoomService>(
                   builder: (context, rs, _) {
-                    return _buildActivePartyStreamBanner(context, rs, isMobile);
+                    if (!rs.isInParty) return const SizedBox.shrink();
+                    return const ActivePartyCard();
                   },
                 ),
 

@@ -12,6 +12,7 @@ import '../../constants/theme.dart';
 import '../../models/media_item.dart' hide SubtitleTrack;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/local_store_service.dart';
 import '../../services/room_service.dart';
 import '../../services/playback_service.dart';
 import '../auth/auth_guard.dart';
@@ -189,6 +190,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _player.stop();
     _player.open(Media(url, httpHeaders: headers));
+
+    final roomService = Provider.of<RoomService>(context, listen: false);
+    if (roomService.isInParty && roomService.isHost) {
+      roomService.sendChangeMedia(
+        widget.mediaId,
+        _currentTitle,
+        url,
+        _currentEpisodeId ?? widget.episodeId ?? '',
+        headers: headers,
+      );
+    }
   }
 
   Future<void> _loadAvailableServers() async {
@@ -376,20 +388,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _initRoomAndSync() {
     final roomService = Provider.of<RoomService>(context, listen: false);
-    final authService = Provider.of<AuthService>(context, listen: false);
+    final localStore = Provider.of<LocalStoreService>(context, listen: false);
 
-    if (_currentRoomCode != null && _currentRoomCode!.isNotEmpty) {
+    if (_currentRoomCode != null && _currentRoomCode!.isNotEmpty && !roomService.isConnected) {
       roomService.connect(
         roomId: _currentRoomCode!,
-        userId: authService.userId ?? 'user_${DateTime.now().millisecondsSinceEpoch}',
-        username: authService.username ?? 'Viewer',
+        userId: localStore.peerId,
+        username: localStore.username,
       );
       _isChatOpen = true;
+    }
+
+    // If host enters player and room is already connected, broadcast media immediately!
+    if (roomService.isInParty && roomService.isHost && _currentStreamUrl.isNotEmpty) {
+      roomService.sendChangeMedia(
+        widget.mediaId,
+        _currentTitle,
+        _currentStreamUrl,
+        _currentEpisodeId ?? widget.episodeId ?? '',
+        headers: widget.streamResult?.headers,
+      );
     }
 
     // Handlers for incoming sync events (respecting _isPartySynced)
     roomService.onRoomStateReceived = (roomState) {
       if (!mounted || !_isPartySynced) return;
+      if (roomState.streamUrl.isNotEmpty && roomState.streamUrl != _currentStreamUrl) {
+        setState(() {
+          _currentTitle = roomState.title;
+          _currentStreamUrl = roomState.streamUrl;
+        });
+        _player.stop();
+        _player.open(Media(roomState.streamUrl, httpHeaders: roomState.headers));
+      }
       final currentPos = roomState.currentPosition;
       if (currentPos > 0) {
         final target = Duration(milliseconds: (currentPos * 1000).toInt());
@@ -432,30 +463,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     roomService.onMediaChangedReceived = (mediaId, title, streamUrl) {
       if (!mounted) return;
-      if (!_isPartySynced) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            elevation: 8,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: BorderSide(color: AppColors.accent.withValues(alpha: 0.4), width: 1.2),
-            ),
-            backgroundColor: const Color(0xFF141622),
-            content: Text(
-              'Party is now watching "$title".',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13.5),
-            ),
-            action: SnackBarAction(
-              label: 'SYNC',
-              textColor: AppColors.accent,
-              onPressed: () => _syncWithParty(),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-        return;
-      }
       setState(() {
         _currentTitle = title;
         _currentStreamUrl = streamUrl;
@@ -464,6 +471,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final headers = roomService.state?.headers;
       _player.stop();
       _player.open(Media(streamUrl, httpHeaders: headers));
+      _player.play();
+      AppToast.show(
+        context,
+        'Now playing with party: $title',
+        type: ToastType.info,
+      );
     };
 
     // Continuous Sync Drift Guard: Checks every 4 seconds to correct drift > 2.5s
