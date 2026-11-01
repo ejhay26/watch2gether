@@ -13,8 +13,11 @@ import '../constants/theme.dart';
 import '../models/media_item.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/local_store_service.dart';
+import '../services/p2p_mesh_service.dart';
 import '../services/playback_service.dart';
 import 'components/app_toast.dart';
+import 'components/liquid_glass.dart';
 import 'auth/auth_modal.dart';
 import 'auth/profile_dialog.dart';
 import 'media/media_overview_modal.dart';
@@ -289,9 +292,23 @@ class _HomeScreenState extends State<HomeScreen> {
     final controller = TextEditingController();
     bool isCreating = false;
 
-    showDialog(
+    showGeneralDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
+      barrierDismissible: true,
+      barrierLabel: 'Watch Party',
+      barrierColor: Colors.black.withOpacity(0.75),
+      transitionDuration: const Duration(milliseconds: 240),
+      transitionBuilder: (ctx, anim, secondaryAnim, child) {
+        final curve = CurvedAnimation(parent: anim, curve: AppMotion.easeOut);
+        return ScaleTransition(
+          scale: Tween<double>(begin: 0.95, end: 1.0).animate(curve),
+          child: FadeTransition(
+            opacity: curve,
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: const Color(0xFF161928),
           shape: RoundedRectangleBorder(
@@ -367,23 +384,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: controller,
                 autofocus: false,
                 textCapitalization: TextCapitalization.characters,
-                maxLength: 6,
+                maxLength: 24,
                 textInputAction: TextInputAction.go,
                 onSubmitted: (_) async {
                   final code = controller.text.trim().toUpperCase();
-                  if (code.length == 6) {
+                  if (code.isNotEmpty) {
                     Navigator.of(ctx).pop();
                     await _handleJoinPartyCode(code);
                   }
                 },
                 style: const TextStyle(
                   color: AppColors.accent,
-                  fontSize: 18,
-                  letterSpacing: 4.0,
+                  fontSize: 16,
+                  letterSpacing: 2.0,
                   fontWeight: FontWeight.bold,
                 ),
                 decoration: InputDecoration(
-                  hintText: "ENTER CODE",
+                  hintText: "ENTER CODE OR IP",
                   counterText: "",
                   prefixIcon: const Icon(Icons.pin_rounded, color: AppColors.textSecondary, size: 18),
                   filled: true,
@@ -400,10 +417,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                child: const Text("Join with Code", style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text("Join with Code or IP", style: TextStyle(fontWeight: FontWeight.bold)),
                 onPressed: () async {
                   final code = controller.text.trim().toUpperCase();
-                  if (code.length == 6) {
+                  if (code.isNotEmpty) {
                     Navigator.of(ctx).pop();
                     await _handleJoinPartyCode(code);
                   }
@@ -419,6 +436,243 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _showMeshStatusSheet(BuildContext context, P2PMeshService mesh) {
+    final localStore = Provider.of<LocalStoreService>(context, listen: false);
+    final mode = mesh.mode;
+    final ip = mesh.localIpAddress ?? "127.0.0.1";
+    final port = localStore.meshDirectPort;
+    final peerId = localStore.peerId;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.all(16),
+            child: LiquidGlassCard(
+              borderRadius: 24,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.hub_rounded, color: AppColors.accent, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "Peer-to-Peer Mesh Node",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17,
+                              ),
+                            ),
+                            Text(
+                              mode == MeshConnectionMode.directLanHost
+                                  ? "Hosting Direct LAN Mesh Room"
+                                  : mode == MeshConnectionMode.directLanClient
+                                      ? "Connected to LAN Peer Node"
+                                      : "Local Sovereign Standalone Node",
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Colors.white60),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F111D),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text("Local IP Address", style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                            Row(
+                              children: [
+                                Text(ip, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13)),
+                                const SizedBox(width: 6),
+                                InkWell(
+                                  onTap: () {
+                                    Clipboard.setData(ClipboardData(text: ip));
+                                    AppToast.show(context, "IP $ip copied to clipboard", type: ToastType.success);
+                                  },
+                                  child: const Icon(Icons.copy_rounded, size: 14, color: AppColors.accent),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const Divider(color: Colors.white10, height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text("Mesh Port", style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                            Text("$port", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13)),
+                          ],
+                        ),
+                        const Divider(color: Colors.white10, height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text("Node Peer ID", style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                            Text(peerId, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 12)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white24),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text("Refresh IP"),
+                          onPressed: () async {
+                            await mesh.detectLocalIp();
+                            if (ctx.mounted) Navigator.of(ctx).pop();
+                            if (mounted) AppToast.show(context, "IP refreshed: ${mesh.localIpAddress ?? 'N/A'}", type: ToastType.info);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          icon: const Icon(Icons.groups_rounded, size: 18),
+                          label: const Text("Watch Party", style: TextStyle(fontWeight: FontWeight.bold)),
+                          onPressed: () {
+                            Navigator.of(ctx).pop();
+                            _showPartyDialog();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMeshStatusBadge(BuildContext context, bool isMobile) {
+    return Consumer<P2PMeshService>(
+      builder: (context, mesh, _) {
+        final isConnected = mesh.isConnected;
+        final mode = mesh.mode;
+
+        Color dotColor;
+        String label;
+
+        if (mode == MeshConnectionMode.directLanHost) {
+          dotColor = Colors.greenAccent;
+          label = isMobile ? "HOST" : "MESH HOST (:8888)";
+        } else if (mode == MeshConnectionMode.directLanClient) {
+          dotColor = Colors.cyanAccent;
+          label = isMobile ? "PEER" : "MESH PEER";
+        } else {
+          dotColor = AppColors.textMuted;
+          label = isMobile ? "P2P" : "SOVEREIGN P2P";
+        }
+
+        return AnimatedPressable(
+          pressedScale: 0.94,
+          onTap: () => _showMeshStatusSheet(context, mesh),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 8 : 10,
+              vertical: isMobile ? 5 : 6,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceElevated.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isConnected
+                    ? dotColor.withValues(alpha: 0.6)
+                    : Colors.white.withValues(alpha: 0.12),
+                width: 1.0,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6.5,
+                  height: 6.5,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    shape: BoxShape.circle,
+                    boxShadow: isConnected
+                        ? [
+                            BoxShadow(
+                              color: dotColor.withValues(alpha: 0.8),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: isConnected ? Colors.white : AppColors.textSecondary,
+                    fontSize: isMobile ? 10 : 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -538,9 +792,9 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             ),
             icon: const Icon(Icons.play_arrow_rounded, size: 18),
-            label: const Text(
-              "Rejoin Stream",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            label: Text(
+              isMobile ? "Rejoin" : "Rejoin Stream",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
             ),
             onPressed: () => _joinActivePartyStream(room),
           ),
@@ -940,108 +1194,121 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Filter Content", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedFilter = 0;
-                        _selectedGenre = "All";
-                        _selectedYear = "All Years";
-                      });
-                      setSheetState(() {});
-                      _loadTrending();
-                      Navigator.of(ctx).pop();
-                    },
-                    child: const Text("Reset All", style: TextStyle(color: AppColors.accent, fontSize: 13)),
+        builder: (context, setSheetState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(20, 12, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ],
-              ),
-              const Divider(color: Colors.white12),
-              const Text("Category", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _buildSheetFilterChip(0, "All", _selectedFilter == 0, () {
-                    setState(() => _selectedFilter = 0);
-                    setSheetState(() {});
-                    _selectFilter(0);
-                  }),
-                  _buildSheetFilterChip(1, "Anime & Animation", _selectedFilter == 1, () {
-                    setState(() => _selectedFilter = 1);
-                    setSheetState(() {});
-                    _selectFilter(1);
-                  }),
-                  _buildSheetFilterChip(2, "Movies", _selectedFilter == 2, () {
-                    setState(() => _selectedFilter = 2);
-                    setSheetState(() {});
-                    _selectFilter(2);
-                  }),
-                  _buildSheetFilterChip(3, "TV Series", _selectedFilter == 3, () {
-                    setState(() => _selectedFilter = 3);
-                    setSheetState(() {});
-                    _selectFilter(3);
-                  }),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Text("Genre", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _genres.map((g) {
-                  final sel = _selectedGenre == g;
-                  return _buildSheetFilterChip(0, g, sel, () {
-                    setState(() => _selectedGenre = g);
-                    setSheetState(() {});
-                    if (g != "All") {
-                      _api.search(g).then((res) {
-                        if (mounted) setState(() => _items = res);
-                      });
-                    }
-                  });
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              const Text("Release Year", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _years.map((y) {
-                  final sel = _selectedYear == y;
-                  return _buildSheetFilterChip(0, y, sel, () {
-                    setState(() => _selectedYear = y);
-                    setSheetState(() {});
-                  });
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accent,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: const Text("Apply Filters", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  onPressed: () => Navigator.of(ctx).pop(),
                 ),
-              ),
-            ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text("Filter Content", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _selectedFilter = 0;
+                          _selectedGenre = "All";
+                          _selectedYear = "All Years";
+                        });
+                        setSheetState(() {});
+                        _loadTrending();
+                        Navigator.of(ctx).pop();
+                      },
+                      child: const Text("Reset All", style: TextStyle(color: AppColors.accent, fontSize: 13)),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.white12),
+                const Text("Category", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildSheetFilterChip(0, "All", _selectedFilter == 0, () {
+                      setState(() => _selectedFilter = 0);
+                      setSheetState(() {});
+                      _selectFilter(0);
+                    }),
+                    _buildSheetFilterChip(1, "Anime & Animation", _selectedFilter == 1, () {
+                      setState(() => _selectedFilter = 1);
+                      setSheetState(() {});
+                      _selectFilter(1);
+                    }),
+                    _buildSheetFilterChip(2, "Movies", _selectedFilter == 2, () {
+                      setState(() => _selectedFilter = 2);
+                      setSheetState(() {});
+                      _selectFilter(2);
+                    }),
+                    _buildSheetFilterChip(3, "TV Series", _selectedFilter == 3, () {
+                      setState(() => _selectedFilter = 3);
+                      setSheetState(() {});
+                      _selectFilter(3);
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text("Genre", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _genres.map((g) {
+                    final sel = _selectedGenre == g;
+                    return _buildSheetFilterChip(0, g, sel, () {
+                      setState(() => _selectedGenre = g);
+                      setSheetState(() {});
+                      if (g != "All") {
+                        _api.search(g).then((res) {
+                          if (mounted) setState(() => _items = res);
+                        });
+                      }
+                    });
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                const Text("Release Year", style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _years.map((y) {
+                    final sel = _selectedYear == y;
+                    return _buildSheetFilterChip(0, y, sel, () {
+                      setState(() => _selectedYear = y);
+                      setSheetState(() {});
+                    });
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text("Apply Filters", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1357,36 +1624,86 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.35),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                child: const Text(
-                  'WATCHHUB',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13,
-                    letterSpacing: 1.5,
+                clipBehavior: Clip.antiAlias,
+                child: Image.asset(
+                  'assets/branding/logo_primary.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Image.asset(
+                    'assets/icons/app_icon.png',
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: AppColors.accent,
+                      child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+                    ),
                   ),
                 ),
               ),
-              if (!isMobile) ...[
-                const SizedBox(width: 12),
-                const Text(
-                  'STREAMING THEATER',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                    letterSpacing: 2.0,
-                    fontWeight: FontWeight.w600,
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RichText(
+                    text: const TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Watch',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        TextSpan(
+                          text: '2',
+                          style: TextStyle(
+                            color: AppColors.accent,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 17,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Gether',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  if (!isMobile)
+                    const Text(
+                      'P2P CINEMA & MESH PARTY',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 8.5,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
           actions: [
+            _buildMeshStatusBadge(context, isMobile),
+            const SizedBox(width: 8),
             _buildPartyWidget(context, isMobile),
             const SizedBox(width: 8),
 
@@ -1508,25 +1825,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          _searchController.text.trim().isNotEmpty
-                              ? 'Results for "${_searchController.text.trim()}"'
-                              : _selectedGenre != "All"
-                                  ? "$_selectedGenre Titles"
-                                  : _selectedFilter == 1
-                                      ? "Anime & Animation"
-                                      : _selectedFilter == 2
-                                          ? "Movies"
-                                          : _selectedFilter == 3
-                                              ? "TV Series"
-                                              : "Featured & Trending",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            letterSpacing: -0.2,
+                        Expanded(
+                          child: Text(
+                            _searchController.text.trim().isNotEmpty
+                                ? 'Results for "${_searchController.text.trim()}"'
+                                : _selectedGenre != "All"
+                                    ? "$_selectedGenre Titles"
+                                    : _selectedFilter == 1
+                                        ? "Anime & Animation"
+                                        : _selectedFilter == 2
+                                            ? "Movies"
+                                            : _selectedFilter == 3
+                                                ? "TV Series"
+                                                : "Featured & Trending",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        const SizedBox(width: 8),
                         OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             backgroundColor: (_selectedGenre != "All" || _selectedYear != "All Years" || _selectedFilter != 0)
@@ -1647,23 +1969,139 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
                       : _error != null
                           ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(_error!, style: const TextStyle(color: AppColors.textSecondary)),
-                                  const SizedBox(height: 12),
-                                  ElevatedButton(
-                                    onPressed: _loadTrending,
-                                    child: const Text('Retry'),
+                              child: Container(
+                                constraints: const BoxConstraints(maxWidth: 420),
+                                margin: const EdgeInsets.all(24),
+                                child: LiquidGlassCard(
+                                  borderRadius: 20,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(14),
+                                        decoration: BoxDecoration(
+                                          color: Colors.redAccent.withValues(alpha: 0.15),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.cloud_off_rounded, color: Colors.redAccent, size: 36),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      const Text(
+                                        "Connection Interrupted",
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        _error!,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                                      ),
+                                      const SizedBox(height: 20),
+                                      AnimatedPressable(
+                                        pressedScale: 0.94,
+                                        onTap: _loadTrending,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.accent,
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.refresh_rounded, size: 18, color: Colors.black),
+                                              SizedBox(width: 8),
+                                              Text(
+                                                "Retry Connection",
+                                                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
                               ),
                             )
                           : _filteredItems.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No titles found.',
-                                    style: TextStyle(color: AppColors.textSecondary),
+                              ? Center(
+                                  child: Container(
+                                    constraints: const BoxConstraints(maxWidth: 440),
+                                    margin: const EdgeInsets.all(24),
+                                    child: LiquidGlassCard(
+                                      borderRadius: 20,
+                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(14),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.accent.withValues(alpha: 0.15),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.search_off_rounded, color: AppColors.accent, size: 36),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Text(
+                                            _searchController.text.isNotEmpty
+                                                ? "No matches for \"${_searchController.text}\""
+                                                : "No titles match filters",
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          const Text(
+                                            "Try searching for popular genres or explore trending cinema:",
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            alignment: WrapAlignment.center,
+                                            children: ["Anime", "Action", "Horror", "Sci-Fi", "2024"].map((tag) {
+                                              return InkWell(
+                                                borderRadius: BorderRadius.circular(16),
+                                                onTap: () {
+                                                  _searchController.text = tag;
+                                                  _performSearch(tag);
+                                                },
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(0xFF0F111D),
+                                                    borderRadius: BorderRadius.circular(16),
+                                                    border: Border.all(color: Colors.white12),
+                                                  ),
+                                                  child: Text(
+                                                    tag,
+                                                    style: const TextStyle(color: AppColors.accent, fontSize: 11.5, fontWeight: FontWeight.bold),
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          TextButton.icon(
+                                            icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white70),
+                                            label: const Text("Reset All Filters", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                            onPressed: () {
+                                              _searchController.clear();
+                                              setState(() {
+                                                _selectedFilter = 0;
+                                                _selectedGenre = "All";
+                                                _selectedYear = "All Years";
+                                              });
+                                              _loadTrending();
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 )
                               : GridView.builder(
@@ -1697,17 +2135,81 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildPlaceholderPoster(MediaItem item) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF1E2238),
+            Color(0xFF111422),
+          ],
+        ),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.movie_filter_rounded,
+                color: AppColors.accent,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              item.title,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (item.year != null && item.year!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                item.year!,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMediaCard(MediaItem item) {
     final rating = item.rating ?? '7.5';
 
-    return InkWell(
+    return AnimatedPressable(
+      pressedScale: 0.96,
       onTap: () => MediaOverviewModal.show(context, item),
-      borderRadius: BorderRadius.circular(10),
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.surfaceBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -1722,15 +2224,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? Image.network(
                           item.poster,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            color: AppColors.surfaceElevated,
-                            child: const Icon(Icons.movie, color: AppColors.textMuted, size: 40),
-                          ),
+                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                            if (wasSynchronouslyLoaded) return child;
+                            return AnimatedOpacity(
+                              opacity: frame == null ? 0.0 : 1.0,
+                              duration: const Duration(milliseconds: 240),
+                              curve: AppMotion.easeOut,
+                              child: child,
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) => _buildPlaceholderPoster(item),
                         )
-                      : Container(
-                          color: AppColors.surfaceElevated,
-                          child: const Icon(Icons.movie, color: AppColors.textMuted, size: 40),
-                        ),
+                      : _buildPlaceholderPoster(item),
 
                   // Overlay gradient
                   Positioned.fill(
@@ -1740,6 +2245,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [Colors.transparent, Colors.transparent, Color(0xDD000000)],
+                          stops: [0.0, 0.5, 1.0],
                         ),
                       ),
                     ),

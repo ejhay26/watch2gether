@@ -418,10 +418,10 @@ class _DesktopHUDState extends State<DesktopHUD> {
                 left: 0,
                 right: 0,
                 child: SafeArea(
-                  top: isFullscreen,
-                bottom: false,
-                left: isFullscreen,
-                right: isFullscreen,
+                  top: isMobile || isFullscreen,
+                  bottom: false,
+                  left: isMobile || isFullscreen,
+                  right: isMobile || isFullscreen,
                 child: Padding(
                   padding: EdgeInsets.symmetric(
                     horizontal: isMobile ? 8.0 : 16.0,
@@ -638,9 +638,9 @@ class _DesktopHUDState extends State<DesktopHUD> {
                 right: 0,
                 child: SafeArea(
                   top: false,
-                bottom: isFullscreen,
-                left: isFullscreen,
-                right: isFullscreen,
+                  bottom: isMobile || isFullscreen,
+                  left: isMobile || isFullscreen,
+                  right: isMobile || isFullscreen,
                 child: Padding(
                   padding: EdgeInsets.symmetric(
                     horizontal: isMobile ? 8.0 : 16.0,

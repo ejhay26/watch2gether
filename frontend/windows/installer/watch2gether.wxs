@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Watch2Gether"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Watch2Gether"
+           UpgradeCode="D37E8492-31C4-4B39-9A0A-2D884FEBC9E2">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Watch2Gether is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)\..\runner\resources\app_icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Watch2Gether" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Watch2Gether" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="B4E3F45A-8C21-4E8C-9024-F4C9B541A123" Win64="yes">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Watch2Gether"
+                  Description="Watch movies and anime in sync with friends"
+                  Target="[INSTALLFOLDER]watch2gether.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RemoveFolder Id="CleanUpShortCut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Watch2Gether" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="7C523D5F-1025-45C7-8A33-EF6767A47291" Win64="yes">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="Watch2Gether"
+                  Description="Watch movies and anime in sync with friends"
+                  Target="[INSTALLFOLDER]watch2gether.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU" Key="Software\Watch2Gether" Name="desktop_shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="ProductFeature" Title="Watch2Gether" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>

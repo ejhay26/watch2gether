@@ -1286,12 +1286,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Positioned.fill(
             child: _buildVideoPlayerWithHUD(roomService, isRoomActive),
           ),
-          if (hasSidebar)
+          if (hasSidebar) ...[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() {
+                  _isChatOpen = false;
+                  _isEpisodesOpen = false;
+                }),
+                child: Container(color: Colors.black54),
+              ),
+            ),
             Positioned(
               right: 0,
               top: 0,
               bottom: 0,
-              width: 300,
+              width: (screenWidth * 0.82).clamp(260.0, 320.0),
               child: Container(
                 decoration: BoxDecoration(
                   color: const Color(0xFF13151F).withOpacity(0.96),
@@ -1311,6 +1321,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
               ),
             ),
+          ],
         ],
       );
     }

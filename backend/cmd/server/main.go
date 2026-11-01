@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -46,8 +46,8 @@ func main() {
 
 	log.Println("Starting Watch2Gether Server with Batteries-Included Security...")
 
-	// 1. Database Connection (Supabase PostgreSQL)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 1. Database Connection (Supabase PostgreSQL or Standalone Mode)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	var db *database.DB
@@ -55,13 +55,13 @@ func main() {
 		var err error
 		db, err = database.Connect(ctx, dbURL)
 		if err != nil {
-			log.Printf("Warning: Database connection failed (%v). Continuing in standalone mode.", err)
+			log.Printf("Notice: Supabase pooler unreachable (%v). Running in zero-cloud standalone mode.", err)
 		} else {
 			log.Println("Connected to Supabase PostgreSQL pooler successfully.")
 			defer db.Close()
 		}
 	} else {
-		log.Println("DATABASE_URL not configured. Running without persistent database.")
+		log.Println("Zero-Cloud Standalone Mode: running without central database.")
 	}
 
 	// 2. Scraper & Multi-Source Providers (TMDB, HiAnime/Ani-Cli, Video & Audio Engines)
@@ -119,11 +119,51 @@ func main() {
 		settingsHandler := api.NewSettingsHandler(db, jwtSecret)
 		settingsHandler.RegisterRoutes(app)
 	} else {
-		app.All("/api/v1/auth/*", func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error":   "Database connection offline. Please check backend DATABASE_URL configuration.",
-				"status":  503,
-				"service": "watch2gether-backend",
+		// Standalone zero-cloud auth fallback
+		app.Post("/api/v1/auth/login", func(c *fiber.Ctx) error {
+			var body struct {
+				Username string `json:"username"`
+			}
+			_ = c.BodyParser(&body)
+			if body.Username == "" {
+				body.Username = "PeerHost"
+			}
+			return c.JSON(fiber.Map{
+				"token": "peer_token_" + body.Username,
+				"user": fiber.Map{
+					"id":       "peer_" + body.Username,
+					"username": body.Username,
+					"email":    body.Username + "@mesh.local",
+					"role":     "host",
+				},
+			})
+		})
+		app.Post("/api/v1/auth/register", func(c *fiber.Ctx) error {
+			var body struct {
+				Username string `json:"username"`
+			}
+			_ = c.BodyParser(&body)
+			if body.Username == "" {
+				body.Username = "PeerHost"
+			}
+			return c.JSON(fiber.Map{
+				"token": "peer_token_" + body.Username,
+				"user": fiber.Map{
+					"id":       "peer_" + body.Username,
+					"username": body.Username,
+					"email":    body.Username + "@mesh.local",
+					"role":     "host",
+				},
+			})
+		})
+		app.Get("/api/v1/auth/me", func(c *fiber.Ctx) error {
+			return c.JSON(fiber.Map{
+				"user": fiber.Map{
+					"id":       "peer_host",
+					"username": "PeerHost",
+					"email":    "peer@mesh.local",
+					"role":     "host",
+				},
 			})
 		})
 	}

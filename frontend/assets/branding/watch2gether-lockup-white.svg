@@ -1,0 +1,24 @@
+<svg fill="#ffffff" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 256" width="840" height="256"><title>Watch2Gether Horizontal Lockup</title>
+  
+  <!-- Symbol scaled and placed on left -->
+  <g transform="translate(20, 28) scale(0.78)">
+    <path fill="#ffffff" fill-rule="evenodd" d="
+      M 48 64
+      C 48 46.3 67.2 35.3 82.5 44.1
+      L 196.5 109.9
+      C 211.8 118.7 211.8 140.9 196.5 149.7
+      L 82.5 215.5
+      C 67.2 224.3 48 213.3 48 195.6
+      Z
+      M 88 80
+      C 88 74.2 94.3 70.6 99.3 73.5
+      L 168.6 113.5
+      C 173.6 116.4 173.6 123.6 168.6 126.5
+      L 99.3 166.5
+      C 94.3 169.4 88 165.8 88 160
+      Z
+    "/>
+  </g>
+  <!-- Wordmark 'Watch' in Primary White, '2' in Indigo Bright, 'Gether' in Primary White -->
+  <text x="240" y="156" font-family="'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif" font-size="76" font-weight="800" letter-spacing="-1.5" fill="#ffffff">Watch<tspan fill="#ffffff">2</tspan>Gether</text>
+</svg>

@@ -1,36 +1,46 @@
-name: Supabase Keep-Alive Cron
+name: Supabase 24/7 Keep-Alive & Auto-Restore
 
 on:
   schedule:
-    # Runs every 2 days at 00:00 UTC to reset Supabase's 7-day inactivity pause
-    - cron: '0 0 */2 * *'
+    # Runs daily at 04:00 UTC (well within Supabase's 7-day inactivity pause limit)
+    - cron: '0 4 * * *'
   workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
 
 jobs:
-  ping:
+  keepalive:
+    name: Supabase Database Heartbeat
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST Endpoint
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: backend/go.sum
+
+      - name: Execute Live Database Heartbeat (PostgreSQL Engine Transaction)
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
-          SUPABASE_KEY="${{ secrets.SUPABASE_ANON_KEY }}"
-          
-          # Default to project credentials if secrets are not explicitly set
-          if [ -z "$SUPABASE_URL" ]; then
-            SUPABASE_URL="https://xlciaxmmpqggacedbtsy.supabase.co"
-          fi
-          if [ -z "$SUPABASE_KEY" ]; then
-            SUPABASE_KEY="sb_publishable_MWhAX8M8Lj9y24PTHbltVQ_3FE2HsiL"
-          fi
-          
-          echo "Sending automated keep-alive ping to $SUPABASE_URL..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$SUPABASE_URL/rest/v1/" \
-            -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY")
-            
-          echo "Supabase responded with HTTP status: $HTTP_STATUS"
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 500 ]; then
-            echo "Success: Supabase activity timer reset. Database remains active."
+          go run ./cmd/keepalive/main.go
+
+      - name: Optional Management API Auto-Unpause (Fallback)
+        if: failure()
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          PROJECT_REF="${SUPABASE_PROJECT_REF:-xlciaxmmpqggacedbtsy}"
+          if [ -n "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "Direct query failed. Triggering Supabase Management API auto-unpause for $PROJECT_REF..."
+            curl -s -X POST "https://api.supabase.com/v1/projects/$PROJECT_REF/unpause" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json"
+            echo "Unpause signal transmitted."
           else
-            echo "Warning: Unexpected status $HTTP_STATUS"
+            echo "Notice: SUPABASE_ACCESS_TOKEN secret is not set. If project was paused, unpause from Supabase dashboard."
           fi

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Watch2Gether Sync Prism Mark -->
+  <path fill="#000000" fill-rule="evenodd" d="
+    M 56 44
+    C 56 30.7 70.4 22.4 82 29.1
+    L 202 98.4
+    C 213.5 105 213.5 121.7 202 128.3
+    L 82 197.6
+    C 70.4 204.3 56 196 56 182.7
+    Z
+    M 88 74
+    L 88 154
+    L 156 114
+    Z
+  "/>
+</svg>

@@ -9,6 +9,8 @@ class AppToast {
     String message, {
     ToastType type = ToastType.info,
     Duration duration = const Duration(seconds: 3),
+    String? actionLabel,
+    VoidCallback? onAction,
   }) {
     if (!context.mounted) return;
 
@@ -40,19 +42,30 @@ class AppToast {
         break;
     }
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth > 640;
+    final horizontalMargin = isDesktop ? (screenWidth - 480) / 2 : 16.0;
+
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
-        elevation: 8,
+        elevation: 12,
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 24, left: 16, right: 16),
-        backgroundColor: const Color(0xFF141622),
+        margin: EdgeInsets.only(bottom: 24, left: horizontalMargin, right: horizontalMargin),
+        backgroundColor: const Color(0xF2111422),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: borderColor, width: 1.2),
         ),
         duration: duration,
+        action: (actionLabel != null && onAction != null)
+            ? SnackBarAction(
+                label: actionLabel,
+                textColor: AppColors.accentBright,
+                onPressed: onAction,
+              )
+            : null,
         content: Row(
           children: [
             Container(

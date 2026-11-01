@@ -23,6 +23,62 @@ class AppColors {
   static const Color danger = Color(0xFFEF4444);
 }
 
+class AppMotion {
+  // Emil Kowalski & Apple Design Fluid Curve Specifications
+  static const Curve easeOut = Cubic(0.23, 1.0, 0.32, 1.0); // Strong ease-out for responsive UI
+  static const Curve easeInOut = Cubic(0.77, 0.0, 0.175, 1.0); // Strong ease-in-out for morphing
+  static const Curve easeDrawer = Cubic(0.32, 0.72, 0.0, 1.0); // iOS sheet & drawer curve
+
+  // Durations (strictly keeping UI interactions snappy & responsive)
+  static const Duration press = Duration(milliseconds: 110);
+  static const Duration fast = Duration(milliseconds: 150);
+  static const Duration normal = Duration(milliseconds: 210);
+  static const Duration modal = Duration(milliseconds: 260);
+}
+
+class AnimatedPressable extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final double pressedScale;
+  final HitTestBehavior behavior;
+
+  const AnimatedPressable({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.onLongPress,
+    this.pressedScale = 0.97,
+    this.behavior = HitTestBehavior.opaque,
+  });
+
+  @override
+  State<AnimatedPressable> createState() => _AnimatedPressableState();
+}
+
+class _AnimatedPressableState extends State<AnimatedPressable> {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null || widget.onLongPress != null;
+    return GestureDetector(
+      behavior: widget.behavior,
+      onTapDown: enabled ? (_) => setState(() => _isPressed = true) : null,
+      onTapUp: enabled ? (_) => setState(() => _isPressed = false) : null,
+      onTapCancel: enabled ? () => setState(() => _isPressed = false) : null,
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
+      child: AnimatedScale(
+        scale: _isPressed ? widget.pressedScale : 1.0,
+        duration: AppMotion.press,
+        curve: AppMotion.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 class AppTheme {
   static ThemeData darkTheme() {
     final base = ThemeData.dark(useMaterial3: true);

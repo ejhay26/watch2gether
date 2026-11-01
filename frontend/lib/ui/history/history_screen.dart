@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../constants/theme.dart';
 import '../../models/history_model.dart';
@@ -167,12 +167,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       overview: 'Resume from ${item.formattedProgress}',
     );
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => MediaOverviewModal(item: mediaItem),
-    );
+    MediaOverviewModal.show(context, mediaItem);
   }
 
   @override
@@ -242,24 +237,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ),
 
-              // Filter Chips
+              // Filter Chips (Horizontally scrollable to guarantee 0 overflow on narrow phones)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 24, vertical: 8),
-                  child: Row(
-                    children: [
-                      _buildFilterChip('All (${_items.length})', 0),
-                      const SizedBox(width: 8),
-                      _buildFilterChip(
-                        'In Progress (${_items.where((i) => !i.isWatched && i.progressPercent > 0).length})',
-                        1,
-                      ),
-                      const SizedBox(width: 8),
-                      _buildFilterChip(
-                        'Watched (${_items.where((i) => i.isWatched || i.progressPercent >= 0.9).length})',
-                        2,
-                      ),
-                    ],
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        _buildFilterChip('All (${_items.length})', 0),
+                        const SizedBox(width: 8),
+                        _buildFilterChip(
+                          'In Progress (${_items.where((i) => !i.isWatched && i.progressPercent > 0).length})',
+                          1,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildFilterChip(
+                          'Watched (${_items.where((i) => i.isWatched || i.progressPercent >= 0.9).length})',
+                          2,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

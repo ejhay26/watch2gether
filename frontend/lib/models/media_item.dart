@@ -46,6 +46,22 @@ class MediaItem {
       seasons: (json['seasons'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'type': type,
+        'poster': poster,
+        'banner': banner,
+        'year': year,
+        'rating': rating,
+        'rating_source': ratingSource,
+        'quality': quality,
+        'duration': duration,
+        'overview': overview,
+        'genres': genres,
+        'seasons': seasons,
+      };
 }
 
 class Episode {

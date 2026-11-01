@@ -1,4 +1,4 @@
-﻿import 'package:provider/provider.dart';
+import 'package:provider/provider.dart';
 import '../../services/room_service.dart';
 import '../../services/playback_service.dart';
 import 'package:flutter/material.dart';
@@ -18,10 +18,34 @@ class MediaOverviewModal extends StatefulWidget {
   });
 
   static void show(BuildContext context, MediaItem item) {
-    showDialog(
+    showGeneralDialog(
       context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Media Overview',
       barrierColor: Colors.black.withOpacity(0.8),
-      builder: (_) => MediaOverviewModal(item: item),
+      transitionDuration: const Duration(milliseconds: 240),
+      pageBuilder: (ctx, anim1, anim2) => MediaOverviewModal(item: item),
+      transitionBuilder: (ctx, anim, secondaryAnim, child) {
+        final curve = CurvedAnimation(parent: anim, curve: AppMotion.easeOut);
+        final screenWidth = MediaQuery.of(ctx).size.width;
+        final isMobile = screenWidth < 550;
+        if (isMobile) {
+          return SlideTransition(
+            position: Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero).animate(curve),
+            child: FadeTransition(
+              opacity: curve,
+              child: child,
+            ),
+          );
+        }
+        return ScaleTransition(
+          scale: Tween<double>(begin: 0.95, end: 1.0).animate(curve),
+          child: FadeTransition(
+            opacity: curve,
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -292,16 +316,23 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
     return Dialog(
       backgroundColor: Colors.transparent,
       elevation: 0,
-      insetPadding: EdgeInsets.symmetric(horizontal: isMobile ? 14 : 24, vertical: isMobile ? 16 : 24),
+      alignment: isMobile ? Alignment.bottomCenter : Alignment.center,
+      insetPadding: isMobile
+          ? EdgeInsets.only(top: MediaQuery.of(context).padding.top + 20)
+          : const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: Center(
         child: Container(
           width: 820,
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.9,
+            maxHeight: isMobile
+                ? MediaQuery.of(context).size.height * 0.92
+                : MediaQuery.of(context).size.height * 0.9,
           ),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: isMobile
+                ? const BorderRadius.vertical(top: Radius.circular(22))
+                : BorderRadius.circular(18),
             border: Border.all(color: Colors.white.withOpacity(0.08)),
             boxShadow: [
               BoxShadow(
@@ -312,12 +343,26 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
             ],
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: isMobile
+                ? const BorderRadius.vertical(top: Radius.circular(22))
+                : BorderRadius.circular(18),
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (isMobile)
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4.5,
+                        margin: const EdgeInsets.only(top: 8, bottom: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(2.5),
+                        ),
+                      ),
+                    ),
                   // Top Banner with Backdrop + Gradient + Close Button
                   Stack(
                     children: [
@@ -714,7 +759,7 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                     ),
                   ],
 
-                  const SizedBox(height: 12),
+                  SizedBox(height: isMobile ? MediaQuery.of(context).padding.bottom + 16 : 16),
                 ],
               ),
             ),

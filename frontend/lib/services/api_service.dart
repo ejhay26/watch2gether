@@ -1,27 +1,32 @@
-﻿import 'package:dio/dio.dart';
+import 'dart:io' show Platform, Socket;
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/history_model.dart';
 import '../models/settings_model.dart';
 import '../models/media_item.dart';
-import '../models/media_item.dart';
 import '../models/room_models.dart';
 import '../models/user_model.dart';
+import 'local_store_service.dart';
+import 'p2p_mesh_service.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
 
   late Dio _dio;
-  String _baseUrl = 'https://nuclei-oil-modular.ngrok-free.dev';
+  String _baseUrl = 'http://127.0.0.1:8080';
   String? _authToken;
 
   String get baseUrl => _baseUrl;
   String? get authToken => _authToken;
 
   ApiService._internal() {
+    _baseUrl = 'http://127.0.0.1:8080';
+
     _dio = Dio(
       BaseOptions(
         baseUrl: _baseUrl,
-        connectTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 15),
         headers: {
           'ngrok-skip-browser-warning': 'true',
@@ -49,26 +54,55 @@ class ApiService {
     _dio.options.baseUrl = _baseUrl;
   }
 
+  /// Automatically tests whether the embedded localhost companion server is active,
+  /// falling back to Android emulator host loopback if needed.
+  Future<void> autoDetectBaseUrl() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final socket = await Socket.connect('127.0.0.1', 8080, timeout: const Duration(milliseconds: 250));
+        socket.destroy();
+        updateBaseUrl('http://127.0.0.1:8080');
+        return;
+      } catch (_) {}
+
+      try {
+        final socket = await Socket.connect('10.0.2.2', 8080, timeout: const Duration(milliseconds: 250));
+        socket.destroy();
+        updateBaseUrl('http://10.0.2.2:8080');
+        return;
+      } catch (_) {}
+    }
+  }
+
   void setAuthToken(String? token) {
     _authToken = token;
   }
 
-  // --- Auth Endpoints ---
+  // --- Auth Endpoints (Local Peer Sovereignty) ---
   Future<Map<String, dynamic>?> login({
     required String username,
     required String password,
   }) async {
+    // If local companion Go backend is running, attempt login; otherwise generate local peer token
     try {
       final res = await _dio.post('/api/v1/auth/login', data: {
         'username': username,
         'password': password,
       });
       return res.data as Map<String, dynamic>?;
-    } on DioException catch (e) {
-      final errorMsg = e.response?.data?['error'] ?? 'Login failed';
-      throw Exception(errorMsg);
-    } catch (e) {
-      throw Exception(e.toString());
+    } catch (_) {
+      // Local fallback
+      final peerId = LocalStoreService().peerId;
+      await LocalStoreService().updateUsername(username);
+      return {
+        'token': 'peer_token_$peerId',
+        'user': {
+          'id': peerId,
+          'username': username,
+          'email': '$username@local.mesh',
+          'role': 'peer',
+        }
+      };
     }
   }
 
@@ -84,29 +118,34 @@ class ApiService {
         'password': password,
       });
       return res.data as Map<String, dynamic>?;
-    } on DioException catch (e) {
-      final errorMsg = e.response?.data?['error'] ?? 'Registration failed';
-      throw Exception(errorMsg);
-    } catch (e) {
-      throw Exception(e.toString());
+    } catch (_) {
+      final peerId = LocalStoreService().peerId;
+      await LocalStoreService().updateUsername(username);
+      return {
+        'token': 'peer_token_$peerId',
+        'user': {
+          'id': peerId,
+          'username': username,
+          'email': email,
+          'role': 'peer',
+        }
+      };
     }
   }
 
   Future<UserModel?> getMe() async {
-    if (_authToken == null) return null;
-    try {
-      final res = await _dio.get('/api/v1/auth/me');
-      final userData = res.data['user'];
-      if (userData != null) {
-        return UserModel.fromJson(userData);
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    final peerId = LocalStoreService().peerId;
+    final username = LocalStoreService().username;
+    return UserModel(
+      id: peerId,
+      username: username,
+      email: '$username@local.mesh',
+      role: 'peer',
+      createdAt: DateTime.now(),
+    );
   }
 
-  // --- Media & Catalog Endpoints ---
+  // --- Media Catalog Endpoints (Scraper API) ---
   Future<List<MediaItem>> getTrending() async {
     try {
       final res = await _dio.get('/api/v1/trending');
@@ -188,7 +227,7 @@ class ApiService {
     }
   }
 
-  // --- Watch Room Endpoints ---
+  // --- Watch Room Endpoints (Decentralized Mesh + Local Host) ---
   Future<String?> createRoom({
     String mediaId = '',
     String title = 'Watch Party',
@@ -196,21 +235,18 @@ class ApiService {
     String episodeId = '',
     Map<String, String>? headers,
   }) async {
-    try {
-      final res = await _dio.post('/api/v1/rooms', data: {
-        'media_id': mediaId,
-        'title': title,
-        'stream_url': streamUrl,
-        'episode_id': episodeId,
-        ...?headers != null ? {'headers': headers} : null,
-      });
-      return res.data['room_id'] as String?;
-    } catch (e) {
-      return null;
-    }
+    final code = await P2PMeshService().hostDirectParty(
+      hostUserId: LocalStoreService().peerId,
+      hostUsername: LocalStoreService().username,
+      title: title,
+    );
+    return code;
   }
 
   Future<RoomStateData?> getRoom(String roomId) async {
+    if (P2PMeshService().state != null && P2PMeshService().activeRoomCode == roomId) {
+      return P2PMeshService().state;
+    }
     try {
       final res = await _dio.get('/api/v1/rooms/$roomId');
       return RoomStateData.fromJson(res.data);
@@ -219,16 +255,9 @@ class ApiService {
     }
   }
 
-  // --- Watch History Endpoints ---
+  // --- Watch History Endpoints (100% Local-First) ---
   Future<List<WatchHistoryItem>> getWatchHistory() async {
-    if (_authToken == null) return [];
-    try {
-      final res = await _dio.get('/api/v1/history');
-      final list = (res.data['history'] as List<dynamic>?) ?? [];
-      return list.map((e) => WatchHistoryItem.fromJson(e as Map<String, dynamic>)).toList();
-    } catch (e) {
-      return [];
-    }
+    return await LocalStoreService().getWatchHistory();
   }
 
   Future<bool> saveWatchHistory({
@@ -240,72 +269,40 @@ class ApiService {
     required int durationSeconds,
     bool? isWatched,
   }) async {
-    if (_authToken == null) return false;
-    try {
-      await _dio.post('/api/v1/history', data: {
-        'media_id': mediaId,
-        'title': title,
-        'poster': poster,
-        'episode_id': episodeId,
-        'timestamp_seconds': timestampSeconds,
-        'duration_seconds': durationSeconds,
-        if (isWatched != null) 'is_watched': isWatched,
-      });
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return await LocalStoreService().saveWatchHistory(
+      mediaId: mediaId,
+      title: title,
+      poster: poster,
+      episodeId: episodeId,
+      timestampSeconds: timestampSeconds,
+      durationSeconds: durationSeconds,
+      isWatched: isWatched,
+    );
   }
 
   Future<bool> deleteWatchHistory({
     required String mediaId,
     String? episodeId,
   }) async {
-    if (_authToken == null) return false;
-    try {
-      final q = <String, dynamic>{'media_id': mediaId};
-      if (episodeId != null && episodeId.isNotEmpty) {
-        q['episode_id'] = episodeId;
-      }
-      await _dio.delete('/api/v1/history', queryParameters: q);
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return await LocalStoreService().deleteWatchHistory(
+      mediaId: mediaId,
+      episodeId: episodeId ?? '',
+    );
   }
 
   Future<bool> clearAllWatchHistory() async {
-    if (_authToken == null) return false;
-    try {
-      await _dio.delete('/api/v1/history/all');
-      return true;
-    } catch (e) {
-      return false;
-    }
+    await LocalStoreService().clearWatchHistory();
+    return true;
   }
 
-  // --- Settings Endpoints ---
+  // --- Settings Endpoints (Local-First) ---
   Future<UserSettingsModel?> getUserSettings() async {
-    if (_authToken == null) return null;
-    try {
-      final res = await _dio.get('/api/v1/settings');
-      if (res.data['settings'] != null) {
-        return UserSettingsModel.fromJson(res.data['settings'] as Map<String, dynamic>);
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    // User settings are maintained locally in SettingsService & SharedPreferences
+    return null;
   }
 
   Future<bool> saveUserSettings(UserSettingsModel settings) async {
-    if (_authToken == null) return false;
-    try {
-      await _dio.post('/api/v1/settings', data: settings.toJson());
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return true;
   }
 
   // --- App Version & In-App Update ---

@@ -1,5 +1,6 @@
 # Local Scripts & Commands
 *.ps1
+!frontend/windows/installer/*.ps1
 start_backend.ps1
 
 # Ralph Loop Local Backlog (Strictly Local)

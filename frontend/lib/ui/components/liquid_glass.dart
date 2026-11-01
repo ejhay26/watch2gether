@@ -43,12 +43,19 @@ class LiquidGlassCard extends StatelessWidget {
           child: Container(
             padding: padding,
             decoration: BoxDecoration(
-              color: const Color(0xDD111422),
+              color: const Color(0xCC0E121E),
               borderRadius: BorderRadius.circular(borderRadius),
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.10),
+                color: Colors.white.withValues(alpha: 0.14),
                 width: 1.0,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.06),
+                  blurRadius: 14,
+                  spreadRadius: -2,
+                ),
+              ],
             ),
             child: child,
           ),

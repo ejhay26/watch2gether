@@ -7,14 +7,17 @@ import 'package:window_manager/window_manager.dart';
 
 import 'constants/theme.dart';
 import 'services/auth_service.dart';
+import 'services/local_store_service.dart';
+import 'services/p2p_mesh_service.dart';
 import 'services/room_service.dart';
 import 'services/playback_service.dart';
 import 'services/settings_service.dart';
-import 'ui/main_navigation_shell.dart';
+import 'ui/splash/splash_loading_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await LocalStoreService().init();
 
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
@@ -23,7 +26,7 @@ void main() async {
         size: Size(1280, 720),
         minimumSize: Size(800, 500),
         center: true,
-        title: 'WatchHub',
+        title: 'Watch2Gether',
       ),
       () async {
         await windowManager.show();
@@ -35,7 +38,9 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => LocalStoreService()),
         ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) => P2PMeshService()),
         ChangeNotifierProvider(create: (_) => RoomService()),
         ChangeNotifierProvider(create: (_) => PlaybackService()),
         ChangeNotifierProvider(create: (_) => SettingsService()),
@@ -51,10 +56,10 @@ class Watch2GetherApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'WatchHub',
+      title: 'Watch2Gether',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme(),
-      home: const MainNavigationShell(),
+      home: const SplashLoadingScreen(),
     );
   }
 }
