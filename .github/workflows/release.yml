@@ -155,23 +155,20 @@ jobs:
         working-directory: backend
         run: go build -ldflags "-s -w" -o "../frontend/build/windows/x64/runner/Release/server.exe" ./cmd/server
 
-      - name: Package Windows MSI Installer (.msi)
-        shell: pwsh
-        run: |
-          try {
-            $tag = "${{ steps.vars.outputs.tag }}"
-            & frontend/windows/installer/build_msi.ps1 -Tag "$tag" -ReleaseDir "frontend/build/windows/x64/runner/Release" -OutputDir "release-artifacts"
-          } catch {
-            Write-Warning "MSI build encountered an issue, proceeding with portable and setup installers: $_"
-          }
-
       - name: Package Windows Setup Installer (.exe) and Portable Standalone (.exe)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-artifacts | Out-Null
           $tag = "${{ steps.vars.outputs.tag }}"
 
-          # 1. Compile Inno Setup Installer (.exe)
+          # 1. Package True Standalone Portable Executable (.exe) without extraction prompt
+          Push-Location "frontend/windows/portable"
+          Compress-Archive -Path "../../build/windows/x64/runner/Release/*" -DestinationPath "app.zip" -Force
+          go build -ldflags "-H=windowsgui -s -w" -o "../../../release-artifacts/watch2gether-windows-x64-portable-$tag.exe" .
+          Pop-Location
+          Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
+
+          # 2. Compile Inno Setup Installer (.exe)
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
           if (-not $iscc) {
             $candidates = @(
@@ -187,12 +184,16 @@ jobs:
             }
           }
 
-          # 2. Package True Standalone Portable Executable (.exe) without extraction prompt
-          Push-Location "frontend/windows/portable"
-          Compress-Archive -Path "../../build/windows/x64/runner/Release/*" -DestinationPath "app.zip" -Force
-          go build -ldflags "-H=windowsgui -s -w" -o "../../../release-artifacts/watch2gether-windows-x64-portable-$tag.exe" .
-          Pop-Location
-          Copy-Item "release-artifacts/watch2gether-windows-x64-portable-$tag.exe" "release-artifacts/watch2gether-windows-x64-portable.exe" -Force
+      - name: Package Windows MSI Installer (.msi)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          try {
+            $tag = "${{ steps.vars.outputs.tag }}"
+            & frontend/windows/installer/build_msi.ps1 -Tag "$tag" -ReleaseDir "frontend/build/windows/x64/runner/Release" -OutputDir "release-artifacts"
+          } catch {
+            Write-Warning "MSI packaging encountered an issue: $_"
+          }
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4

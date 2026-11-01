@@ -1,5 +1,5 @@
 param (
-    [string]$Tag = "v1.0.6",
+    [string]$Tag = "v1.0.7",
     [string]$ReleaseDir = "frontend/build/windows/x64/runner/Release",
     [string]$OutputDir = "release-artifacts"
 )
@@ -10,6 +10,8 @@ Write-Host "=== Starting WiX MSI Packaging for Watch2Gether ($Tag) ==="
 
 # 1. Locate WiX Toolset
 $wixCandidates = @(
+    "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+    "C:\Program Files\WiX Toolset v3.14\bin",
     "C:\Program Files (x86)\WiX Toolset v3.11\bin",
     "C:\Program Files\WiX Toolset v3.11\bin"
 )
@@ -46,11 +48,10 @@ if (-not $candle -or -not $light -or -not $heat) {
 }
 
 if (-not $candle -or -not $light -or -not $heat) {
-    Write-Error "WiX Toolset (candle, light, heat) is required to build the MSI package."
-    exit 1
+    throw "WiX Toolset (candle, light, heat) is not available to build the MSI package."
 }
 
-# 2. Normalize version string (e.g. v1.0.6 -> 1.0.6)
+# 2. Normalize version string (e.g. v1.0.7 -> 1.0.7)
 $version = $Tag.TrimStart('v')
 if ($version -notmatch '^\d+\.\d+\.\d+') {
     $version = "1.0.0"
@@ -70,29 +71,26 @@ Write-Host "Harvesting files from $ReleaseDir..."
 & $heat dir "$ReleaseDir" -cg AppFiles -dr INSTALLFOLDER -gg -scom -sreg -sfrag -srd -var "var.SourceDir" -out "$scriptDir\files.wxs"
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "heat.exe failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
+    throw "heat.exe failed with exit code $LASTEXITCODE"
 }
 
-# 4. Compile WiX objects with candle
+# 4. Compile WiX objects with candle (-arch x64 is valid for candle)
 Write-Host "Compiling WiX components..."
 & $candle -arch x64 -dProductVersion="$version" -dSourceDir="$ReleaseDir" -dProjectDir="$scriptDir" "$scriptDir\watch2gether.wxs" "$scriptDir\files.wxs" -out "$scriptDir\"
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "candle.exe failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
+    throw "candle.exe failed with exit code $LASTEXITCODE"
 }
 
-# 5. Link MSI with light
+# 5. Link MSI with light (-arch is NOT valid for light, use -b to specify base directory)
 $targetMsiTagged = "$OutputDir\watch2gether-windows-x64-$Tag.msi"
 $targetMsiLatest = "$OutputDir\watch2gether-windows-x64.msi"
 
 Write-Host "Linking MSI package: $targetMsiTagged..."
-& $light -arch x64 -sval -ext WixUIExtension "$scriptDir\watch2gether.wixobj" "$scriptDir\files.wixobj" -o "$targetMsiTagged"
+& $light -sval -ext WixUIExtension -b "$ReleaseDir" "$scriptDir\watch2gether.wixobj" "$scriptDir\files.wixobj" -o "$targetMsiTagged"
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "light.exe failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
+    throw "light.exe failed with exit code $LASTEXITCODE"
 }
 
 Copy-Item "$targetMsiTagged" "$targetMsiLatest" -Force

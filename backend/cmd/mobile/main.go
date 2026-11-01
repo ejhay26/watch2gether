@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -43,28 +44,81 @@ func StartServer(port C.int) C.int {
 		}
 
 		fiberApp = fiber.New(fiber.Config{
+			AppName:               "Watch2Gether Embedded Mobile Engine",
 			DisableStartupMessage: true,
+			ErrorHandler: func(c *fiber.Ctx, err error) error {
+				code := fiber.StatusInternalServerError
+				if e, ok := err.(*fiber.Error); ok {
+					code = e.Code
+				}
+				return c.Status(code).JSON(fiber.Map{
+					"error":   err.Error(),
+					"status":  code,
+					"service": "watch2gether-embedded",
+				})
+			},
 		})
-		fiberApp.Use(recover.New())
+		fiberApp.Use(recover.New(recover.Config{
+			EnableStackTrace: false,
+		}))
 		fiberApp.Use(cors.New(cors.Config{
 			AllowOrigins: "*",
 			AllowHeaders: "*",
 		}))
 
-		scraperMgr := scraper.NewManager()
-		roomMgr := room.NewManager()
+		scraperMgr := scraper.NewManager("")
+		roomHub := room.NewHub()
 
 		// Connect to Supabase if DATABASE_URL is configured, or run in local standalone mode
 		dbURL := os.Getenv("DATABASE_URL")
-		var db *database.Database
+		var db *database.DB
 		if dbURL != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			db, _ = database.Connect(ctx, dbURL)
 		}
 
-		jwtSecret := "super-secret-jwt-key-watch2gether-2026-production"
-		api.SetupRoutes(fiberApp, scraperMgr, roomMgr, db, jwtSecret)
+		jwtSecret := os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			jwtSecret = "super-secret-jwt-key-watch2gether-mobile-embedded"
+		}
+
+		// Register routes
+		mediaHandler := api.NewMediaHandler(scraperMgr)
+		mediaHandler.RegisterRoutes(fiberApp)
+
+		roomHandler := room.NewRoomHandler(roomHub)
+		roomHandler.RegisterRoutes(fiberApp)
+
+		if db != nil {
+			authHandler := api.NewAuthHandler(db, jwtSecret)
+			authHandler.RegisterRoutes(fiberApp)
+
+			historyHandler := api.NewHistoryHandler(db, jwtSecret)
+			historyHandler.RegisterRoutes(fiberApp)
+
+			settingsHandler := api.NewSettingsHandler(db, jwtSecret)
+			settingsHandler.RegisterRoutes(fiberApp)
+		} else {
+			fiberApp.Post("/api/v1/auth/login", func(c *fiber.Ctx) error {
+				var body struct {
+					Username string `json:"username"`
+				}
+				_ = c.BodyParser(&body)
+				if body.Username == "" {
+					body.Username = "MobileHost"
+				}
+				return c.JSON(fiber.Map{
+					"token": "peer_token_" + body.Username,
+					"user": fiber.Map{
+						"id":       "peer_" + body.Username,
+						"username": body.Username,
+						"email":    body.Username + "@mesh.local",
+						"role":     "host",
+					},
+				})
+			})
+		}
 
 		go func() {
 			addr := fmt.Sprintf("127.0.0.1:%d", p)
