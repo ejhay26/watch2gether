@@ -1,4 +1,4 @@
-﻿package scraper
+package scraper
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/ejhay26/watch2gether/backend/internal/engine/catalog"
 	"github.com/ejhay26/watch2gether/backend/internal/engine/subtitle"
 	"github.com/ejhay26/watch2gether/backend/internal/engine/video"
+	"github.com/ejhay26/watch2gether/backend/internal/model"
 )
 
 type Manager struct {
@@ -114,21 +115,24 @@ func rankSearchResults(rawQuery string, items []MediaItem) []MediaItem {
 	scored := make([]scoredItem, len(items))
 	for i, it := range items {
 		titleLower := strings.ToLower(strings.TrimSpace(it.Title))
+		fuzzyTitle := model.CleanForFuzzyMatch(it.Title)
+		fuzzyQuery := model.CleanForFuzzyMatch(cleanQuery)
 		score := 0.0
 
-		// 1. Exact title match
-		if titleLower == queryLower || (cleanQuery != "" && titleLower == cleanQuery) {
+		// 1. Exact title match or normalized match (handles "T.I.T.L.E." vs "title")
+		if titleLower == queryLower || (cleanQuery != "" && titleLower == cleanQuery) || (fuzzyQuery != "" && fuzzyTitle == fuzzyQuery) {
 			score += 1000
-		} else if cleanQuery != "" && strings.HasPrefix(titleLower, cleanQuery) {
+		} else if (cleanQuery != "" && strings.HasPrefix(titleLower, cleanQuery)) || (fuzzyQuery != "" && strings.HasPrefix(fuzzyTitle, fuzzyQuery)) {
 			score += 500
-		} else if cleanQuery != "" && strings.Contains(titleLower, cleanQuery) {
+		} else if (cleanQuery != "" && strings.Contains(titleLower, cleanQuery)) || (fuzzyQuery != "" && strings.Contains(fuzzyTitle, fuzzyQuery)) {
 			score += 300
 		}
 
 		// 2. Word matching
 		matchedWords := 0
 		for _, w := range significantWords {
-			if strings.Contains(titleLower, w) {
+			fw := model.CleanForFuzzyMatch(w)
+			if strings.Contains(titleLower, w) || (fw != "" && strings.Contains(fuzzyTitle, fw)) {
 				matchedWords++
 				score += 80
 			} else {

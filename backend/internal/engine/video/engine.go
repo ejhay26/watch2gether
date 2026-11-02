@@ -32,51 +32,6 @@ func (e *VideoEngine) GetTrackedRegistry() *TrackedSourceRegistry {
 
 // GetServers generates distinct, dynamically labeled servers for this specific media item
 func (e *VideoEngine) GetServers(episodeID string, title string) ([]model.Server, error) {
-	// Check if this media item matches a registered archive film
-	mediaID := episodeID
-	if strings.Contains(episodeID, "-ep") {
-		mediaID = strings.Split(episodeID, "-ep")[0]
-	} else if strings.Contains(episodeID, "-s") {
-		mediaID = strings.Split(episodeID, "-s")[0]
-	}
-
-	// 0. Check Tracked Pinned Sources
-	if pinned, found := e.trackedSources.GetPinned(title, mediaID); found {
-		var servers []model.Server
-		for i, src := range pinned.Sources {
-			servers = append(servers, model.Server{
-				ID:   fmt.Sprintf("%s-srv-%d", episodeID, i+1),
-				Name: fmt.Sprintf("%s (%s)", src.Quality, pinned.Title),
-			})
-		}
-		if len(servers) == 0 {
-			servers = append(servers, model.Server{
-				ID:   fmt.Sprintf("%s-srv-master", episodeID),
-				Name: fmt.Sprintf("Master Direct Stream (%s)", pinned.Title),
-			})
-		}
-		return servers, nil
-	}
-
-	film, found := e.archiveProvider.Match(mediaID, title)
-	if found {
-		var servers []model.Server
-		for i, src := range film.Sources {
-			servers = append(servers, model.Server{
-				ID:   fmt.Sprintf("%s-srv-%d", episodeID, i+1),
-				Name: fmt.Sprintf("%s (%s)", src.Quality, film.Title),
-			})
-		}
-		if len(servers) == 0 {
-			servers = append(servers, model.Server{
-				ID:   fmt.Sprintf("%s-srv-master", episodeID),
-				Name: fmt.Sprintf("Master Direct Stream (%s)", film.Title),
-			})
-		}
-		return servers, nil
-	}
-
-	// Dynamic servers for modern/trending TMDB items
 	filmTitle := title
 	if filmTitle == "" {
 		filmTitle = "Feature"
@@ -84,16 +39,71 @@ func (e *VideoEngine) GetServers(episodeID string, title string) ([]model.Server
 
 	return []model.Server{
 		{
-			ID:   fmt.Sprintf("%s-srv-master", episodeID),
-			Name: fmt.Sprintf("Ultra HD Master (%s)", filmTitle),
+			ID:    fmt.Sprintf("%s-srv-yoru", episodeID),
+			Name:  "Yoru",
+			Flag:  "🇺🇸",
+			Audio: "Original audio. May have 4K",
+			Badge: "Primary",
 		},
 		{
-			ID:   fmt.Sprintf("%s-srv-cdn", episodeID),
-			Name: fmt.Sprintf("FastCDN High-Speed Mirror (%s)", filmTitle),
+			ID:    fmt.Sprintf("%s-srv-cypher", episodeID),
+			Name:  "Cypher",
+			Flag:  "🇺🇸",
+			Audio: "Original audio",
 		},
 		{
-			ID:   fmt.Sprintf("%s-srv-backup", episodeID),
-			Name: fmt.Sprintf("Adaptive Direct Stream (%s)", filmTitle),
+			ID:    fmt.Sprintf("%s-srv-breach", episodeID),
+			Name:  "Breach",
+			Flag:  "🇺🇸",
+			Audio: "Original audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-neon", episodeID),
+			Name:  "Neon",
+			Flag:  "🇺🇸",
+			Audio: "Original audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-vyse", episodeID),
+			Name:  "Vyse",
+			Flag:  "🇺🇸",
+			Audio: "Original audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-killjoy", episodeID),
+			Name:  "Killjoy",
+			Flag:  "🇩🇪",
+			Audio: "German audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-fade", episodeID),
+			Name:  "Fade",
+			Flag:  "🇮🇳",
+			Audio: "Hindi audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-omen", episodeID),
+			Name:  "Omen",
+			Flag:  "🇪🇸",
+			Audio: "Spanish audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-raze", episodeID),
+			Name:  "Raze",
+			Flag:  "🇵🇹",
+			Audio: "Portuguese audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-chamber", episodeID),
+			Name:  "Chamber",
+			Flag:  "🇫🇷",
+			Audio: "French audio",
+		},
+		{
+			ID:    fmt.Sprintf("%s-srv-jett", episodeID),
+			Name:  "Jett",
+			Flag:  "🇯🇵",
+			Audio: "Japanese audio",
 		},
 	}, nil
 }
@@ -114,7 +124,7 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 	// 0. Check Tracked Pinned Sources (Guarantees zero regression on verified titles)
 	if pinned, found := e.trackedSources.GetPinned(title, mediaID); found {
 		sources := pinned.Sources
-		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
+		if (strings.HasSuffix(serverID, "-srv-2") || strings.HasSuffix(serverID, "-srv-cypher")) && len(sources) > 1 {
 			sources = []model.Source{sources[1], sources[0]}
 		}
 		res := &model.StreamResult{
@@ -129,7 +139,7 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 	// 1. Try pre-indexed curated public domain / classic films
 	if film, found := e.archiveProvider.Match(mediaID, title); found {
 		sources := film.Sources
-		if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
+		if (strings.HasSuffix(serverID, "-srv-2") || strings.HasSuffix(serverID, "-srv-cypher")) && len(sources) > 1 {
 			sources = []model.Source{sources[1], sources[0]}
 		}
 		res := &model.StreamResult{

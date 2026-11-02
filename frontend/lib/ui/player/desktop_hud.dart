@@ -3,8 +3,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../../constants/theme.dart';
 import '../../models/media_item.dart' hide SubtitleTrack;
+import '../../services/settings_service.dart';
+import 'player_settings_modal.dart';
 
 class DesktopHUD extends StatefulWidget {
   final bool isPartySynced;
@@ -44,6 +47,7 @@ class DesktopHUD extends StatefulWidget {
   final ValueChanged<String>? onSelectAudioTrack;
   final ValueChanged<String>? onSelectSubtitle;
   final VoidCallback? onBackgroundTap;
+  final void Function(PlayerSettingsTab tab)? onOpenPlayerSettings;
 
   const DesktopHUD({
     super.key,
@@ -84,6 +88,7 @@ class DesktopHUD extends StatefulWidget {
     this.isPartySynced = true,
     this.onTogglePartySync,
     this.onBackgroundTap,
+    this.onOpenPlayerSettings,
   });
 
   @override
@@ -388,14 +393,19 @@ class _DesktopHUDState extends State<DesktopHUD> {
                       },
                       onDoubleTapDown: (details) {
                         final dx = details.localPosition.dx;
+                        int seekSecs = 10;
+                        try {
+                          seekSecs = Provider.of<SettingsService>(context, listen: false).seekDurationSeconds;
+                        } catch (_) {}
+                        final seekDur = Duration(seconds: seekSecs);
                         if (dx < width * 0.35) {
-                          final newPos = position - const Duration(seconds: 10);
+                          final newPos = position - seekDur;
                           onSeek(newPos < Duration.zero ? Duration.zero : newPos);
-                          _triggerSeekFeedback('-10s', isLeft: true);
+                          _triggerSeekFeedback('-${seekSecs}s', isLeft: true);
                         } else if (dx > width * 0.65) {
-                          final newPos = position + const Duration(seconds: 10);
+                          final newPos = position + seekDur;
                           onSeek(newPos > duration ? duration : newPos);
-                          _triggerSeekFeedback('+10s', isLeft: false);
+                          _triggerSeekFeedback('+${seekSecs}s', isLeft: false);
                         }
                       },
                       child: Container(color: Colors.transparent),
@@ -871,13 +881,33 @@ class _DesktopHUDState extends State<DesktopHUD> {
                                 ),
 
                               // Quick Settings Button (Mobile or constrained width)
-                              if (!showIndividualMenus) ...[
-                                IconButton(
-                                  icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 21),
-                                  tooltip: 'Quality & Audio Settings',
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _showMobileSettingsSheet(context),
-                                ),
+                              if (!showIndividualMenus || widget.onOpenPlayerSettings != null) ...[
+                                if (widget.onOpenPlayerSettings != null) ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 20),
+                                    tooltip: 'Subtitles & Captions',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => widget.onOpenPlayerSettings!(PlayerSettingsTab.subs),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.dns_rounded, color: Colors.white, size: 20),
+                                    tooltip: 'Servers & Audio Dubs',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => widget.onOpenPlayerSettings!(PlayerSettingsTab.servers),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
+                                    tooltip: 'Player Settings',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => widget.onOpenPlayerSettings!(PlayerSettingsTab.quality),
+                                  ),
+                                ] else
+                                  IconButton(
+                                    icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 21),
+                                    tooltip: 'Quality & Audio Settings',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => _showMobileSettingsSheet(context),
+                                  ),
                               ] else ...[
                             // Desktop: Individual Upward Popup Menus
                             // Audio Dub / Track Selector

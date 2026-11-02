@@ -7,6 +7,7 @@ class MediaItem {
   final String? year;
   final String? rating;
   final String? ratingSource;
+  final String? ageRating;
   final String? quality;
   final String? duration;
   final String? overview;
@@ -22,6 +23,7 @@ class MediaItem {
     this.year,
     this.rating,
     this.ratingSource,
+    this.ageRating,
     this.quality,
     this.duration,
     this.overview,
@@ -39,6 +41,7 @@ class MediaItem {
       year: json['year'],
       rating: json['rating'],
       ratingSource: json['rating_source'] ?? 'TMDB',
+      ageRating: json['age_rating'] ?? json['ageRating'],
       quality: json['quality'] ?? '1080p HD',
       duration: json['duration'],
       overview: json['overview'],
@@ -56,6 +59,7 @@ class MediaItem {
         'year': year,
         'rating': rating,
         'rating_source': ratingSource,
+        'age_rating': ageRating,
         'quality': quality,
         'duration': duration,
         'overview': overview,
@@ -93,13 +97,25 @@ class Episode {
 class Server {
   final String id;
   final String name;
+  final String? flag;
+  final String? audio;
+  final String? badge;
 
-  Server({required this.id, required this.name});
+  Server({
+    required this.id,
+    required this.name,
+    this.flag,
+    this.audio,
+    this.badge,
+  });
 
   factory Server.fromJson(Map<String, dynamic> json) {
     return Server(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
+      flag: json['flag'],
+      audio: json['audio'],
+      badge: json['badge'],
     );
   }
 }

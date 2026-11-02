@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -17,10 +16,12 @@ import '../../services/auth_service.dart';
 import '../../services/local_store_service.dart';
 import '../../services/room_service.dart';
 import '../../services/playback_service.dart';
+import '../../services/settings_service.dart';
 import '../auth/auth_guard.dart';
 import 'desktop_hud.dart';
 import 'episodes_drawer.dart';
 import 'mobile_gestures.dart';
+import 'player_settings_modal.dart';
 import 'room_chat_drawer.dart';
 import '../components/app_toast.dart';
 
@@ -73,6 +74,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<String> _availableAudioTracks = [];
   List<Server> _availableServers = [];
   List<String> _availableSubtitles = ['Off'];
+  bool _isPlayerSettingsOpen = false;
+  PlayerSettingsTab _playerSettingsTab = PlayerSettingsTab.subs;
+  final Map<String, ServerStateStatus> _serverStatuses = {};
+  final Set<String> _favoriteServers = {};
+  Server? _currentServer;
   final Map<String, AudioTrack> _nativeAudioTrackMap = {};
   final Map<String, Server> _serverAudioTrackMap = {};
   final Map<String, SubtitleTrack> _nativeSubtitleTrackMap = {};
@@ -94,6 +100,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _hideControlsTimer;
   Timer? _historyTimer;
   Timer? _syncCheckTimer;
+  Timer? _bufferingWatchdog;
   bool _controlsVisible = true;
   bool _isFullscreen = false;
   bool _wasMaximizedBeforeFullscreen = false;
@@ -140,6 +147,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _player.stream.buffering.listen((buffering) {
       if (mounted) setState(() => _isBuffering = buffering);
+      if (buffering) {
+        _bufferingWatchdog?.cancel();
+        _bufferingWatchdog = Timer(const Duration(seconds: 8), () {
+          if (mounted && _isBuffering && _player.state.position == Duration.zero) {
+            // Player has been stuck buffering for 8 seconds without playback progress
+            if (_currentServer != null) {
+              setState(() {
+                _serverStatuses[_currentServer!.id] = ServerStateStatus.failed;
+              });
+              AppToast.show(
+                context,
+                'Stream stalled on ${_currentServer!.name}. Auto-fetching next server...',
+                type: ToastType.warning,
+              );
+              _autoFetchNextSource(_currentServer!);
+            }
+          }
+        });
+      } else {
+        _bufferingWatchdog?.cancel();
+      }
+    });
+
+    _player.stream.error.listen((error) {
+      if (mounted && error.isNotEmpty) {
+        if (_currentServer != null) {
+          setState(() {
+            _serverStatuses[_currentServer!.id] = ServerStateStatus.failed;
+          });
+          AppToast.show(
+            context,
+            'Playback error on ${_currentServer!.name}. Switching server...',
+            type: ToastType.warning,
+          );
+          _autoFetchNextSource(_currentServer!);
+        }
+      }
     });
 
     _player.stream.playing.listen((playing) {
@@ -227,10 +271,149 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final epId = _currentEpisodeId ?? widget.episodeId ?? widget.mediaId;
       final srvs = await ApiService().getServers(epId, title: _currentTitle);
       if (mounted) {
-        setState(() => _availableServers = srvs);
+        setState(() {
+          _availableServers = srvs;
+          if (_currentServer == null && srvs.isNotEmpty) {
+            _currentServer = srvs.first;
+            _serverStatuses[srvs.first.id] = ServerStateStatus.active;
+          }
+        });
         _refreshAudioTracks();
       }
     } catch (_) {}
+  }
+
+  void _openPlayerSettings(PlayerSettingsTab tab) {
+    setState(() {
+      _playerSettingsTab = tab;
+      _isPlayerSettingsOpen = true;
+      _isChatOpen = false;
+      _isEpisodesOpen = false;
+    });
+  }
+
+  Future<void> _loadServerAndStream(Server srv, {bool isAutoFailover = false}) async {
+    setState(() {
+      _currentServer = srv;
+      _serverStatuses[srv.id] = ServerStateStatus.loading;
+    });
+
+    try {
+      final res = await ApiService().getSources(srv.id, title: _currentTitle);
+      if (res == null || res.sources.isEmpty) {
+        throw Exception('Server returned no valid stream sources');
+      }
+
+      final src = res.sources.first;
+      final currentPos = _player.state.position;
+
+      if (mounted) {
+        setState(() {
+          _serverStatuses[srv.id] = ServerStateStatus.active;
+          _currentStreamUrl = src.url;
+          _currentQuality = src.quality;
+          _currentStreamResult = res;
+        });
+
+        _openMedia(src.url, headers: res.headers);
+        if (currentPos > Duration.zero) {
+          await _player.seek(currentPos);
+        }
+        await _player.play();
+        _refreshAudioTracks();
+
+        _autoSelectLanguageAudio(srv);
+
+        AppToast.show(
+          context,
+          'Connected to ${srv.name} (${srv.audio ?? srv.flag ?? "Stream Active"})',
+          type: ToastType.success,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _serverStatuses[srv.id] = ServerStateStatus.failed;
+        });
+        _autoFetchNextSource(srv);
+      }
+    }
+  }
+
+  void _autoFetchNextSource(Server failedServer) {
+    final idx = _availableServers.indexWhere((s) => s.id == failedServer.id);
+    if (idx != -1 && idx + 1 < _availableServers.length) {
+      final nextServer = _availableServers[idx + 1];
+      AppToast.show(
+        context,
+        '${failedServer.name} unavailable. Auto-switching to ${nextServer.name}...',
+        type: ToastType.warning,
+        duration: const Duration(seconds: 3),
+      );
+      _loadServerAndStream(nextServer, isAutoFailover: true);
+    } else {
+      AppToast.show(
+        context,
+        'All stream sources exhausted for this media item.',
+        type: ToastType.error,
+      );
+    }
+  }
+
+  void _autoSelectLanguageAudio(Server srv) {
+    final nameLower = srv.name.toLowerCase();
+    final audioLower = (srv.audio ?? '').toLowerCase();
+
+    String? targetLang;
+    if (nameLower.contains('killjoy') || audioLower.contains('german')) {
+      targetLang = 'de';
+    } else if (nameLower.contains('fade') || audioLower.contains('hindi')) {
+      targetLang = 'hi';
+    } else if (nameLower.contains('omen') || audioLower.contains('spanish')) {
+      targetLang = 'es';
+    } else if (nameLower.contains('raze') || audioLower.contains('portuguese')) {
+      targetLang = 'pt';
+    } else if (nameLower.contains('chamber') || audioLower.contains('french')) {
+      targetLang = 'fr';
+    } else if (nameLower.contains('jett') || audioLower.contains('japanese')) {
+      targetLang = 'ja';
+    }
+
+    if (targetLang != null) {
+      final tracks = _player.state.tracks.audio;
+      for (final t in tracks) {
+        final lang = (t.language ?? '').toLowerCase();
+        final title = (t.title ?? '').toLowerCase();
+        if (lang.contains(targetLang) || title.contains(targetLang)) {
+          _player.setAudioTrack(t);
+          break;
+        }
+      }
+    }
+  }
+
+  Future<void> _applyUploadedSubtitle(String fileName, String content) async {
+    try {
+      String formattedContent = content;
+      if (!formattedContent.trimLeft().startsWith('WEBVTT')) {
+        final reSRT = RegExp(r'(\d{2}:\d{2}:\d{2}),(\d{3})');
+        formattedContent = 'WEBVTT\n\n${formattedContent.replaceAllMapped(reSRT, (m) => '${m[1]}.${m[2]}')}';
+      }
+      await _player.setSubtitleTrack(SubtitleTrack.data(formattedContent, title: fileName, language: 'Custom'));
+      if (mounted) {
+        setState(() {
+          _currentSubtitleTrack = fileName;
+          if (!_availableSubtitles.contains(fileName)) {
+            _availableSubtitles.add(fileName);
+          }
+        });
+        AppToast.show(context, 'Subtitle applied: $fileName', type: ToastType.success);
+      }
+    } catch (e) {
+      if (mounted) {
+        AppToast.show(context, 'Failed to apply uploaded subtitle', type: ToastType.error);
+      }
+    }
   }
 
   String _formatAudioTrackName(AudioTrack track, int index, int total) {
@@ -884,7 +1067,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _startHideControlsTimer() {
     _hideControlsTimer?.cancel();
     if (_player.state.playing && mounted) {
-      _hideControlsTimer = Timer(const Duration(milliseconds: 3500), () {
+      double durSecs = 3.5;
+      try {
+        durSecs = Provider.of<SettingsService>(context, listen: false).autoHideControlsSeconds;
+      } catch (_) {}
+      if (durSecs <= 0) {
+        return; // 'Never' option selected
+      }
+      _hideControlsTimer = Timer(Duration(milliseconds: (durSecs * 1000).round()), () {
         if (mounted && _player.state.playing) {
           setState(() => _controlsVisible = false);
         }
@@ -1004,6 +1194,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _bufferingWatchdog?.cancel();
     _hideControlsTimer?.cancel();
     _historyTimer?.cancel();
     _syncCheckTimer?.cancel();
@@ -1073,55 +1264,60 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          MobileGesturesOverlay(
-            onTap: _handleBackgroundTap,
-            onDoubleTapLeft: () {
-              _seek(_player.state.position - const Duration(seconds: 10));
-            },
-            onDoubleTapRight: () {
-              _seek(_player.state.position + const Duration(seconds: 10));
-            },
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Center(
-                  child: Video(
-                    controller: _controller,
-                    controls: NoVideoControls,
-                    subtitleViewConfiguration: const SubtitleViewConfiguration(
-                      style: TextStyle(
-                        height: 1.4,
-                        fontSize: 24.0,
-                        letterSpacing: 0.2,
-                        wordSpacing: 1.0,
-                        color: Color(0xffffffff),
-                        fontWeight: FontWeight.bold,
-                        backgroundColor: Color(0xaa000000),
+          Consumer<SettingsService>(
+            builder: (context, settings, _) {
+              return MobileGesturesOverlay(
+                seekDurationSeconds: settings.seekDurationSeconds,
+                onTap: _handleBackgroundTap,
+                onDoubleTapLeft: () {
+                  _seek(_player.state.position - Duration(seconds: settings.seekDurationSeconds));
+                },
+                onDoubleTapRight: () {
+                  _seek(_player.state.position + Duration(seconds: settings.seekDurationSeconds));
+                },
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
+                      child: Video(
+                        controller: _controller,
+                        controls: NoVideoControls,
+                        subtitleViewConfiguration: SubtitleViewConfiguration(
+                          style: TextStyle(
+                            height: 1.4,
+                            fontSize: settings.subtitleFontSize + (_isDesktop ? 4 : 0),
+                            letterSpacing: 0.2,
+                            wordSpacing: 1.0,
+                            color: Color(settings.subtitleTextColor),
+                            fontWeight: FontWeight.bold,
+                            backgroundColor: Colors.black.withValues(alpha: settings.subtitleBackgroundOpacity),
+                          ),
+                          textAlign: TextAlign.center,
+                          padding: const EdgeInsets.all(24.0),
+                        ),
                       ),
-                      textAlign: TextAlign.center,
-                      padding: EdgeInsets.all(24.0),
                     ),
-                  ),
+                    if (_isBuffering && !_controlsVisible)
+                      Center(
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                          ),
+                          child: const CircularProgressIndicator(
+                            color: AppColors.accent,
+                            strokeWidth: 3.5,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                if (_isBuffering && !_controlsVisible)
-                  Center(
-                    child: Container(
-                      width: 64,
-                      height: 64,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                      ),
-                      child: const CircularProgressIndicator(
-                        color: AppColors.accent,
-                        strokeWidth: 3.5,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+              );
+            },
           ),
 
           // HUD Overlay with Reactive Play/Pause stream
@@ -1206,6 +1402,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     onSelectAudioTrack: _switchAudioTrack,
                     onSelectSubtitle: _switchSubtitle,
                     onBackgroundTap: _handleBackgroundTap,
+                    onOpenPlayerSettings: _openPlayerSettings,
                       );
                     },
                   );
@@ -1213,6 +1410,58 @@ class _PlayerScreenState extends State<PlayerScreen> {
               );
             },
           ),
+          if (_isPlayerSettingsOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _isPlayerSettingsOpen = false),
+                child: Container(
+                  color: Colors.black45,
+                  alignment: Alignment.centerRight,
+                  padding: EdgeInsets.only(
+                    right: _isDesktop ? 32 : 12,
+                    top: 24,
+                    bottom: 24,
+                    left: _isDesktop ? 0 : 12,
+                  ),
+                  child: GestureDetector(
+                    onTap: () {}, // absorb inner tap
+                    child: PlayerSettingsModal(
+                      player: _player,
+                      title: _currentTitle,
+                      servers: _availableServers,
+                      currentServer: _currentServer,
+                      sources: _currentStreamResult?.sources ?? [],
+                      currentQuality: _currentQuality,
+                      availableSubtitles: _availableSubtitles,
+                      currentSubtitle: _currentSubtitleTrack,
+                      availableAudioTracks: _availableAudioTracks,
+                      currentAudioTrack: _currentAudioTrack,
+                      serverStatuses: _serverStatuses,
+                      favoriteServers: _favoriteServers,
+                      initialTab: _playerSettingsTab,
+                      onSelectServer: (srv) => _loadServerAndStream(srv),
+                      onSelectQuality: _switchSource,
+                      onSelectSubtitle: _switchSubtitle,
+                      onSelectAudioTrack: _switchAudioTrack,
+                      onToggleFavoriteServer: (srvId) {
+                        setState(() {
+                          if (_favoriteServers.contains(srvId)) {
+                            _favoriteServers.remove(srvId);
+                          } else {
+                            _favoriteServers.add(srvId);
+                          }
+                        });
+                      },
+                      onUploadSubtitle: (fileName, content) async {
+                        await _applyUploadedSubtitle(fileName, content);
+                      },
+                      onClose: () => setState(() => _isPlayerSettingsOpen = false),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

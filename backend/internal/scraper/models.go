@@ -1,4 +1,4 @@
-package scraper
+﻿package scraper
 
 import "github.com/ejhay26/watch2gether/backend/internal/model"
 

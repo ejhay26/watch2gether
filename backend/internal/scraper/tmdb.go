@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ejhay26/watch2gether/backend/internal/model"
 )
 
 type TMDBScraper struct {
@@ -63,87 +65,103 @@ type tmdbListResponse struct {
 }
 
 func (t *TMDBScraper) Search(query string) ([]MediaItem, error) {
-	endpoint := fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", t.BaseURL, t.getKey(), url.QueryEscape(query))
-	resp, err := t.Client.Get(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("tmdb search request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb search failed with status %d", resp.StatusCode)
+	variants := model.GenerateSearchQueryVariants(query)
+	if len(variants) == 0 {
+		variants = []string{query}
 	}
 
-	var res tmdbListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, err
-	}
-
+	seen := make(map[string]bool)
 	var items []MediaItem
-	for _, item := range res.Results {
-		if item.MediaType != "" && item.MediaType != "movie" && item.MediaType != "tv" {
+
+	for _, v := range variants {
+		endpoint := fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", t.BaseURL, t.getKey(), url.QueryEscape(v))
+		resp, err := t.Client.Get(endpoint)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			continue
 		}
 
-		title := item.Title
-		if title == "" {
-			title = item.Name
-		}
-		if title == "" {
+		var res tmdbListResponse
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+			resp.Body.Close()
 			continue
 		}
+		resp.Body.Close()
 
-		mType := MediaTypeMovie
-		if item.MediaType == "tv" {
-			mType = MediaTypeTV
-		}
+		for _, item := range res.Results {
+			if item.MediaType != "" && item.MediaType != "movie" && item.MediaType != "tv" {
+				continue
+			}
 
-		poster := ""
-		if item.PosterPath != "" {
-			poster = t.ImageBase + item.PosterPath
-		} else if item.BackdropPath != "" {
-			poster = t.ImageBase + item.BackdropPath
-		} else {
-			poster = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80"
-		}
+			title := item.Title
+			if title == "" {
+				title = item.Name
+			}
+			if title == "" {
+				continue
+			}
 
-		banner := ""
-		if item.BackdropPath != "" {
-			banner = t.ImageBase + item.BackdropPath
-		} else {
-			banner = poster
-		}
+			mType := MediaTypeMovie
+			if item.MediaType == "tv" {
+				mType = MediaTypeTV
+			}
 
-		year := item.ReleaseDate
-		if year == "" {
-			year = item.FirstAirDate
-		}
-		if len(year) >= 4 {
-			year = year[:4]
-		}
+			id := fmt.Sprintf("tmdb-%s-%d", mType, item.ID)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 
-		overview := item.Overview
-		if overview == "" {
-			overview = fmt.Sprintf("Stream %s in Ultra HD on WatchHub.", title)
-		}
+			poster := ""
+			if item.PosterPath != "" {
+				poster = t.ImageBase + item.PosterPath
+			} else if item.BackdropPath != "" {
+				poster = t.ImageBase + item.BackdropPath
+			} else {
+				poster = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80"
+			}
 
-		rating := "7.5"
-		if item.VoteAverage > 0 {
-			rating = fmt.Sprintf("%.1f", item.VoteAverage)
-		}
+			banner := ""
+			if item.BackdropPath != "" {
+				banner = t.ImageBase + item.BackdropPath
+			} else {
+				banner = poster
+			}
 
-		items = append(items, MediaItem{
-			ID:           fmt.Sprintf("tmdb-%s-%d", mType, item.ID),
-			Title:        title,
-			Type:         mType,
-			Poster:       poster,
-			Banner:       banner,
-			Year:         year,
-			Rating:       rating,
-			RatingSource: "TMDB",
-			Quality:      "1080p HD",
-			Overview:     overview,
-		})
+			year := item.ReleaseDate
+			if year == "" {
+				year = item.FirstAirDate
+			}
+			if len(year) >= 4 {
+				year = year[:4]
+			}
+
+			overview := item.Overview
+			if overview == "" {
+				overview = fmt.Sprintf("Stream %s in Ultra HD on WatchHub.", title)
+			}
+
+			rating := "7.5"
+			if item.VoteAverage > 0 {
+				rating = fmt.Sprintf("%.1f", item.VoteAverage)
+			}
+
+			items = append(items, MediaItem{
+				ID:           id,
+				Title:        title,
+				Type:         mType,
+				Poster:       poster,
+				Banner:       banner,
+				Year:         year,
+				Rating:       rating,
+				RatingSource: "TMDB",
+				Quality:      "1080p HD",
+				Overview:     overview,
+			})
+		}
 	}
 
 	return items, nil
@@ -245,7 +263,7 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 	mType := parts[1]
 	tmdbID := parts[2]
 
-	endpoint := fmt.Sprintf("%s/%s/%s?api_key=%s", t.BaseURL, mType, tmdbID, t.getKey())
+	endpoint := fmt.Sprintf("%s/%s/%s?api_key=%s&append_to_response=release_dates,content_ratings", t.BaseURL, mType, tmdbID, t.getKey())
 	resp, err := t.Client.Get(endpoint)
 	if err != nil {
 		return nil, err
@@ -266,10 +284,71 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 		Genres          []struct {
 			Name string `json:"name"`
 		} `json:"genres"`
+		ReleaseDates *struct {
+			Results []struct {
+				ISO3166_1    string `json:"iso_3166_1"`
+				ReleaseDates []struct {
+					Certification string `json:"certification"`
+				} `json:"release_dates"`
+			} `json:"results"`
+		} `json:"release_dates"`
+		ContentRatings *struct {
+			Results []struct {
+				ISO3166_1 string `json:"iso_3166_1"`
+				Rating    string `json:"rating"`
+			} `json:"results"`
+		} `json:"content_ratings"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&detailsRaw); err != nil {
 		return nil, err
+	}
+
+	ageRating := ""
+	if detailsRaw.ReleaseDates != nil {
+		for _, r := range detailsRaw.ReleaseDates.Results {
+			if r.ISO3166_1 == "US" {
+				for _, rd := range r.ReleaseDates {
+					if cert := strings.TrimSpace(rd.Certification); cert != "" {
+						ageRating = cert
+						break
+					}
+				}
+				if ageRating != "" {
+					break
+				}
+			}
+		}
+		if ageRating == "" {
+			for _, r := range detailsRaw.ReleaseDates.Results {
+				for _, rd := range r.ReleaseDates {
+					if cert := strings.TrimSpace(rd.Certification); cert != "" {
+						ageRating = cert
+						break
+					}
+				}
+				if ageRating != "" {
+					break
+				}
+			}
+		}
+	}
+
+	if ageRating == "" && detailsRaw.ContentRatings != nil {
+		for _, r := range detailsRaw.ContentRatings.Results {
+			if r.ISO3166_1 == "US" && strings.TrimSpace(r.Rating) != "" {
+				ageRating = strings.TrimSpace(r.Rating)
+				break
+			}
+		}
+		if ageRating == "" {
+			for _, r := range detailsRaw.ContentRatings.Results {
+				if cert := strings.TrimSpace(r.Rating); cert != "" {
+					ageRating = cert
+					break
+				}
+			}
+		}
 	}
 
 	title := detailsRaw.Title
@@ -344,6 +423,7 @@ func (t *TMDBScraper) GetDetails(id string) (*MediaDetails, error) {
 			Year:         year,
 			Rating:       rating,
 			RatingSource: "TMDB",
+			AgeRating:    ageRating,
 			Quality:      "1080p HD",
 			Duration:     duration,
 			Overview:     overview,

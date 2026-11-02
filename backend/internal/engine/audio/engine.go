@@ -1,4 +1,4 @@
-package audio
+﻿package audio
 
 type AudioTrackInfo struct {
 	ID       string `json:"id"`

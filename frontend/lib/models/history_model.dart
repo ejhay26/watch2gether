@@ -1,4 +1,4 @@
-class WatchHistoryItem {
+﻿class WatchHistoryItem {
   final String id;
   final String userId;
   final String mediaId;

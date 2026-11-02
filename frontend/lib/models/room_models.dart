@@ -1,4 +1,4 @@
-class Participant {
+﻿class Participant {
   final String id;
   final String username;
   final bool isHost;

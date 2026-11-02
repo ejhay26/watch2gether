@@ -1,4 +1,4 @@
-package subtitle
+﻿package subtitle
 
 import (
 	"context"

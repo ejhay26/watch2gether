@@ -178,13 +178,16 @@ func (c *CatalogEngine) Search(ctx context.Context, query string) ([]model.Media
 
 	cleanQ := strings.TrimSpace(query)
 	lowerQ := strings.ToLower(cleanQ)
+	fuzzyQ := model.CleanForFuzzyMatch(cleanQ)
 
 	// 1. Search verified archive films (only valid entries with poster)
 	for _, vf := range c.archiveProvider.GetAllFilms() {
 		if vf.Poster == "" {
 			continue
 		}
-		if strings.Contains(strings.ToLower(vf.Title), lowerQ) {
+		titleLower := strings.ToLower(vf.Title)
+		titleFuzzy := model.CleanForFuzzyMatch(vf.Title)
+		if strings.Contains(titleLower, lowerQ) || (fuzzyQ != "" && (titleFuzzy == fuzzyQ || strings.Contains(titleFuzzy, fuzzyQ))) {
 			id := fmt.Sprintf("tmdb-movie-%s", vf.TMDBID)
 			seen[id] = true
 			yr := vf.Year
@@ -217,7 +220,10 @@ func (c *CatalogEngine) Search(ctx context.Context, query string) ([]model.Media
 		searchYear = strings.TrimSpace(yearMatches[2])
 	}
 
+	// 3. Generate query variants to handle dot-separated words (e.g. t.i.t.l.e.), symbols, acronyms
+	variants := model.GenerateSearchQueryVariants(cleanQ)
 	var endpoints []string
+
 	if searchYear != "" {
 		endpoints = append(endpoints,
 			fmt.Sprintf("%s/search/movie?api_key=%s&query=%s&primary_release_year=%s", c.baseURL, c.getKey(), url.QueryEscape(searchTitle), searchYear),
@@ -226,9 +232,9 @@ func (c *CatalogEngine) Search(ctx context.Context, query string) ([]model.Media
 			fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(searchTitle)),
 		)
 	} else {
-		endpoints = append(endpoints,
-			fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(cleanQ)),
-		)
+		for _, v := range variants {
+			endpoints = append(endpoints, fmt.Sprintf("%s/search/multi?api_key=%s&query=%s", c.baseURL, c.getKey(), url.QueryEscape(v)))
+		}
 	}
 
 	for _, endpoint := range endpoints {

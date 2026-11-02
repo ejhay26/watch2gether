@@ -1,4 +1,4 @@
-import "package:flutter/material.dart";
+﻿import "package:flutter/material.dart";
 import "../../constants/theme.dart";
 
 enum ToastType { info, success, error, warning }

@@ -35,6 +35,7 @@ func (h *MediaHandler) RegisterRoutes(router fiber.Router) {
 	api.Get("/sources/tracked", h.GetTrackedSources)
 	api.Get("/subtitles/vtt", h.GetVTTSubtitles)
 	api.Get("/subtitles/proxy", h.ProxySubtitles)
+	api.Get("/subtitles/search", h.SearchSubtitles)
 }
 
 func (h *MediaHandler) Health(c *fiber.Ctx) error {
@@ -269,6 +270,27 @@ func (h *MediaHandler) ProxySubtitles(c *fiber.Ctx) error {
 	}
 
 	return c.SendString(content)
+}
+
+func (h *MediaHandler) SearchSubtitles(c *fiber.Ctx) error {
+	query := c.Query("q")
+	imdb := c.Query("imdb")
+	lang := c.Query("lang")
+
+	mgr, ok := h.scraper.(*scraper.Manager)
+	if !ok || mgr.GetSubtitleEngine() == nil {
+		return c.JSON(fiber.Map{
+			"subtitles": []interface{}{},
+		})
+	}
+
+	subs, err := mgr.GetSubtitleEngine().SearchSubtitles(c.Context(), query, imdb, lang)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{
+		"subtitles": subs,
+	})
 }
 
 func (h *MediaHandler) GetTrackedSources(c *fiber.Ctx) error {

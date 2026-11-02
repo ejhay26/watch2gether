@@ -495,6 +495,26 @@ class _MediaOverviewModalState extends State<MediaOverviewModal> {
                                     ),
                                   ),
 
+                                // Age Rating badge (e.g. PG-13, R, 16+, TV-MA)
+                                if (media.ageRating != null && media.ageRating!.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.redAccent.withOpacity(0.16),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                                    ),
+                                    child: Text(
+                                      media.ageRating!,
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+
                                 // Quality badge
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

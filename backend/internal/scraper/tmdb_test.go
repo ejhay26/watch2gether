@@ -4,9 +4,25 @@ import (
 	"testing"
 )
 
+func TestSearchParamedic(t *testing.T) {
+	tmdb := NewTMDBScraper("")
+	results, err := tmdb.Search("The Paramedic")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	for i, r := range results {
+		t.Logf("Result %d: %s (%s, ID=%s)", i, r.Title, r.Year, r.ID)
+	}
+
+	details, err := tmdb.GetDetails("tmdb-movie-701175")
+	if err != nil {
+		t.Fatalf("Failed to get details: %v", err)
+	}
+	t.Logf("The Paramedic (2020) Details: Title=%s, AgeRating=%s, Duration=%s, Year=%s", details.Title, details.AgeRating, details.Duration, details.Year)
+}
+
 func TestTMDBScraperDirect(t *testing.T) {
 	tmdb := NewTMDBScraper("")
-
 	// Test Trending
 	trending, err := tmdb.GetTrending()
 	if err != nil || len(trending) == 0 {
@@ -22,11 +38,17 @@ func TestTMDBScraperDirect(t *testing.T) {
 	t.Logf("Search for 'avatar' returned %d items. First item: %s (%s)", len(searchRes), searchRes[0].Title, searchRes[0].ID)
 
 	// Test Details
-	details, err := tmdb.GetDetails(searchRes[0].ID)
+	details, err := tmdb.GetDetails("tmdb-movie-19995")
 	if err != nil || details.Title == "" {
-		t.Fatalf("Expected details for %s, err: %v", searchRes[0].ID, err)
+		t.Fatalf("Expected details for tmdb-movie-19995, err: %v", err)
 	}
-	t.Logf("Details for %s: %s, %s, %v", searchRes[0].ID, details.Title, details.Rating, details.Genres)
+	t.Logf("Details for Avatar: %s, %s, %v, AgeRating=%s", details.Title, details.Rating, details.Genres, details.AgeRating)
+
+	// Test The Paramedic Details
+	paramedicDetails, err := tmdb.GetDetails("tmdb-movie-623199")
+	if err == nil {
+		t.Logf("The Paramedic AgeRating: %s", paramedicDetails.AgeRating)
+	}
 
 	// Test Episodes
 	episodes, err := tmdb.GetEpisodes(searchRes[0].ID, 1)

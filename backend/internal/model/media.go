@@ -16,6 +16,7 @@ type MediaItem struct {
 	Year         string    `json:"year,omitempty"`
 	Rating       string    `json:"rating,omitempty"`
 	RatingSource string    `json:"rating_source,omitempty"`
+	AgeRating    string    `json:"age_rating,omitempty"`
 	Quality      string    `json:"quality,omitempty"`
 	Duration     string    `json:"duration,omitempty"`
 	Overview     string    `json:"overview,omitempty"`
@@ -41,6 +42,9 @@ type Server struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	ServerID int    `json:"server_id,omitempty"`
+	Flag     string `json:"flag,omitempty"`
+	Audio    string `json:"audio,omitempty"`
+	Badge    string `json:"badge,omitempty"`
 }
 
 type Subtitle struct {

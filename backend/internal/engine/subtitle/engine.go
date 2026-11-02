@@ -302,3 +302,89 @@ func (e *SubtitleEngine) fetchStremioSubtitles(ctx context.Context, imdbID strin
 
 	return result
 }
+
+// SearchSubtitles provides active on-demand searching across OpenSubtitles and Stremio subtitle indexers
+func (e *SubtitleEngine) SearchSubtitles(ctx context.Context, query string, imdbID string, langFilter string) ([]model.Subtitle, error) {
+	if imdbID == "" && query != "" {
+		imdbID = e.resolveImdbID(ctx, "", query)
+	}
+
+	var results []model.Subtitle
+	seen := make(map[string]bool)
+
+	add := func(s model.Subtitle) {
+		if s.Lang == "" || seen[s.Lang+s.URL] {
+			return
+		}
+		if langFilter != "" && !strings.Contains(strings.ToLower(s.Lang), strings.ToLower(langFilter)) {
+			return
+		}
+		seen[s.Lang+s.URL] = true
+		results = append(results, s)
+	}
+
+	// 1. If imdbID is resolved, query Stremio OpenSubtitles v3
+	if imdbID != "" {
+		subs := e.fetchStremioSubtitles(ctx, imdbID, query)
+		for _, s := range subs {
+			if s.Lang != "Off" {
+				add(s)
+			}
+		}
+	}
+
+	// 2. Query open subtitles fallback indexer or Wyzie if available
+	if len(results) == 0 && imdbID != "" {
+		wyzieURL := fmt.Sprintf("https://sub.wyzie.ru/search?id=%s", imdbID)
+		req, err := http.NewRequestWithContext(ctx, "GET", wyzieURL, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+			resp, err := e.client.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				var wyzieRes []struct {
+					URL     string `json:"url"`
+					Display string `json:"display"`
+					Lang    string `json:"lang"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&wyzieRes) == nil {
+					for _, item := range wyzieRes {
+						if item.URL != "" {
+							display := item.Display
+							if display == "" {
+								display = item.Lang
+							}
+							add(model.Subtitle{
+								URL:  fmt.Sprintf("/api/v1/subtitles/proxy?url=%s&title=%s&lang=%s", url.QueryEscape(item.URL), url.QueryEscape(query), url.QueryEscape(display)),
+								Lang: display,
+							})
+						}
+					}
+				}
+			} else if resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// 3. Fallback standard high-quality subtitles
+	if len(results) == 0 {
+		encTitle := url.QueryEscape(query)
+		common := []model.Subtitle{
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=en&title=%s", encTitle), Lang: "English [CC]"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=es&title=%s", encTitle), Lang: "Spanish (Español)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=fr&title=%s", encTitle), Lang: "French (Français)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=de&title=%s", encTitle), Lang: "German (Deutsch)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=it&title=%s", encTitle), Lang: "Italian (Italiano)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=pt&title=%s", encTitle), Lang: "Portuguese (Português)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=hi&title=%s", encTitle), Lang: "Hindi (हिन्दी)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=ja&title=%s", encTitle), Lang: "Japanese (日本語)"},
+			{URL: fmt.Sprintf("/api/v1/subtitles/vtt?lang=zh&title=%s", encTitle), Lang: "Chinese (中文)"},
+		}
+		for _, c := range common {
+			add(c)
+		}
+	}
+
+	return results, nil
+}

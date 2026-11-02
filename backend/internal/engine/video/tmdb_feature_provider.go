@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -60,24 +61,35 @@ type tmdbVideosResponse struct {
 }
 
 func cleanTitleForSearchVariants(raw string) []string {
-	// 1. Replace '&' with 'and'
-	s1 := strings.ReplaceAll(raw, "&", "and")
-	s1 = cleanSymbols(s1)
+	reYear := regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+	withoutYear := strings.TrimSpace(reYear.ReplaceAllString(raw, ""))
 
-	// 2. Replace '&' with space
-	s2 := strings.ReplaceAll(raw, "&", " ")
-	s2 = cleanSymbols(s2)
-
-	// 3. Raw cleaned
-	s3 := cleanSymbols(raw)
+	var candidates []string
+	if withoutYear != "" && withoutYear != raw {
+		candidates = append(candidates, withoutYear)
+	}
+	candidates = append(candidates, raw)
 
 	seen := make(map[string]bool)
 	var list []string
-	for _, s := range []string{s1, s2, s3} {
-		trimmed := strings.TrimSpace(s)
-		if trimmed != "" && !seen[trimmed] {
-			seen[trimmed] = true
-			list = append(list, trimmed)
+	for _, cand := range candidates {
+		// 1. Replace '&' with 'and'
+		s1 := strings.ReplaceAll(cand, "&", "and")
+		s1 = cleanSymbols(s1)
+
+		// 2. Replace '&' with space
+		s2 := strings.ReplaceAll(cand, "&", " ")
+		s2 = cleanSymbols(s2)
+
+		// 3. Raw cleaned
+		s3 := cleanSymbols(cand)
+
+		for _, s := range []string{s1, s2, s3} {
+			trimmed := strings.TrimSpace(s)
+			if trimmed != "" && !seen[trimmed] {
+				seen[trimmed] = true
+				list = append(list, trimmed)
+			}
 		}
 	}
 	return list
@@ -116,7 +128,18 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 		variants = []string{cleanTitle}
 	}
 
-	queryWords := strings.Fields(strings.ToLower(cleanSymbols(cleanTitle)))
+	reYear := regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+	rawQueryWords := strings.Fields(strings.ToLower(cleanSymbols(cleanTitle)))
+	var queryWords []string
+	for _, w := range rawQueryWords {
+		if len(w) == 4 && (strings.HasPrefix(w, "19") || strings.HasPrefix(w, "20")) {
+			continue
+		}
+		queryWords = append(queryWords, w)
+	}
+	if len(queryWords) == 0 {
+		queryWords = rawQueryWords
+	}
 
 	var candidateLinks []string
 	seenLinks := make(map[string]bool)
@@ -177,6 +200,8 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 
 	regNorm := regexp.MustCompile(`[^a-zA-Z0-9]+`)
 	qNorm := strings.Trim(regNorm.ReplaceAllString(strings.ToLower(cleanTitle), "-"), "-")
+	cleanWithoutYear := strings.TrimSpace(reYear.ReplaceAllString(cleanTitle, ""))
+	qNormWithoutYear := strings.Trim(regNorm.ReplaceAllString(strings.ToLower(cleanWithoutYear), "-"), "-")
 
 	junkKeywords := []string{
 		"making-of", "the-making-of", "behind-the-scenes", "featurette",
@@ -209,7 +234,7 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 		slugWords := strings.Split(slug, "-")
 
 		// Exact slug match is top winner
-		if slug == qNorm {
+		if slug == qNorm || (qNormWithoutYear != "" && slug == qNormWithoutYear) {
 			scored = append(scored, scoredLink{url: link, score: 3000})
 			continue
 		}
@@ -496,6 +521,57 @@ func (p *TMDBFeatureProvider) ResolveFeatureStream(ctx context.Context, mediaID 
 	flixRes := p.ScrapeFlixHQ(ctx, displayTitle)
 	if flixRes != nil && len(flixRes.Sources) > 0 {
 		return flixRes, nil
+	}
+
+	// 1b. If title includes a year (e.g. "The Paramedic 2020"), retry scraping without the year
+	reYear := regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+	titleWithoutYear := strings.TrimSpace(reYear.ReplaceAllString(displayTitle, ""))
+	if titleWithoutYear != "" && titleWithoutYear != displayTitle {
+		if res := p.ScrapeFlixHQ(ctx, titleWithoutYear); res != nil && len(res.Sources) > 0 {
+			return res, nil
+		}
+	}
+
+	// 1c. If mediaID has tmdb-movie-XXX or tmdb-tv-XXX, look up TMDB for alternative/original titles
+	if strings.Contains(mediaID, "tmdb-") && len(p.apiKeys) > 0 {
+		parts := strings.Split(mediaID, "-")
+		if len(parts) >= 3 {
+			mType := parts[1]
+			tmdbID := parts[2]
+			apiKey := p.apiKeys[0]
+			endpoint := fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s", mType, tmdbID, apiKey)
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+			if err == nil {
+				resp, err := p.client.Do(req)
+				if err == nil && resp.StatusCode == http.StatusOK {
+					defer resp.Body.Close()
+					var raw struct {
+						Title         string `json:"title"`
+						Name          string `json:"name"`
+						OriginalTitle string `json:"original_title"`
+						OriginalName  string `json:"original_name"`
+					}
+					if json.NewDecoder(resp.Body).Decode(&raw) == nil {
+						log.Printf("[TMDB-RESOLVE] Raw Title=%q, Name=%q, OrigTitle=%q, OrigName=%q", raw.Title, raw.Name, raw.OriginalTitle, raw.OriginalName)
+						altTitles := []string{raw.Title, raw.Name, raw.OriginalTitle, raw.OriginalName}
+						for _, alt := range altTitles {
+							alt = strings.TrimSpace(alt)
+							if alt != "" && !strings.EqualFold(alt, displayTitle) {
+								if res := p.ScrapeFlixHQ(ctx, alt); res != nil && len(res.Sources) > 0 {
+									return res, nil
+								}
+								altClean := strings.TrimSpace(reYear.ReplaceAllString(alt, ""))
+								if altClean != "" && altClean != alt {
+									if res := p.ScrapeFlixHQ(ctx, altClean); res != nil && len(res.Sources) > 0 {
+										return res, nil
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// 2. Fallback to direct external verified video stream

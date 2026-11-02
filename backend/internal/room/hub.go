@@ -1,4 +1,4 @@
-package room
+﻿package room
 
 import (
 	"crypto/rand"

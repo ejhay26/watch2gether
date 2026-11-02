@@ -227,6 +227,19 @@ class ApiService {
     }
   }
 
+  Future<List<SubtitleTrack>> searchSubtitles(String query, {String? imdbId, String? lang}) async {
+    try {
+      final queryParams = <String, dynamic>{'q': query};
+      if (imdbId != null && imdbId.isNotEmpty) queryParams['imdb'] = imdbId;
+      if (lang != null && lang.isNotEmpty) queryParams['lang'] = lang;
+      final res = await _dio.get('/api/v1/subtitles/search', queryParameters: queryParams);
+      final subs = (res.data['subtitles'] as List<dynamic>?) ?? [];
+      return subs.map((e) => SubtitleTrack.fromJson(e)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
   // --- Watch Room Endpoints (Decentralized Mesh + Local Host) ---
   Future<String?> createRoom({
     String mediaId = '',

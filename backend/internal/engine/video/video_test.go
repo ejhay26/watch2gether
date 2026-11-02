@@ -93,3 +93,31 @@ func TestTaleOfTales(t *testing.T) {
 		t.Logf("Source %d: %s (%s, is_m3u8: %v)", i, s.Quality, s.URL, s.IsM3U8)
 	}
 }
+
+func TestParamedic(t *testing.T) {
+	ve := NewVideoEngine(nil)
+
+	t.Run("Title with Year", func(t *testing.T) {
+		stream, err := ve.GetStream(context.Background(), "tmdb-movie-623199-ep1-srv-yoru", "The Paramedic 2020")
+		if err != nil {
+			t.Logf("The Paramedic 2020 error: %v", err)
+		} else {
+			t.Logf("The Paramedic 2020 returned %d sources", len(stream.Sources))
+			for _, s := range stream.Sources {
+				t.Logf("Source: %s -> %s", s.Quality, s.URL)
+			}
+		}
+	})
+
+	t.Run("Spanish Title El Practicante", func(t *testing.T) {
+		stream, err := ve.GetStream(context.Background(), "tmdb-movie-701175-ep1-srv-yoru", "El practicante")
+		if err != nil {
+			t.Logf("El practicante error: %v", err)
+		} else {
+			t.Logf("El practicante returned %d sources", len(stream.Sources))
+			for _, s := range stream.Sources {
+				t.Logf("Source: %s -> %s", s.Quality, s.URL)
+			}
+		}
+	})
+}

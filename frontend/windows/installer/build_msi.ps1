@@ -66,6 +66,11 @@ if ($parts.Length -eq 2) {
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Normalize paths to absolute Windows paths with backslashes
+$ReleaseDir = [System.IO.Path]::GetFullPath($ReleaseDir).TrimEnd('\', '/')
+$OutputDir = [System.IO.Path]::GetFullPath($OutputDir).TrimEnd('\', '/')
+$scriptDir = [System.IO.Path]::GetFullPath($scriptDir).TrimEnd('\', '/')
+
 # 3. Harvest files from Release folder
 Write-Host "Harvesting files from $ReleaseDir..."
 & $heat dir "$ReleaseDir" -cg AppFiles -dr INSTALLFOLDER -gg -scom -sreg -sfrag -srd -var "var.SourceDir" -out "$scriptDir\files.wxs"
