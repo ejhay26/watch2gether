@@ -92,6 +92,24 @@ class DesktopHUD extends StatefulWidget {
 
 class _DesktopHUDState extends State<DesktopHUD> {
   double? _dragPercent;
+  String? _seekIndicatorText;
+  bool _showSeekIndicator = false;
+  bool _seekIsLeft = false;
+
+  void _triggerSeekFeedback(String text, {required bool isLeft}) {
+    setState(() {
+      _seekIndicatorText = text;
+      _showSeekIndicator = true;
+      _seekIsLeft = isLeft;
+    });
+    Future.delayed(const Duration(milliseconds: 650), () {
+      if (mounted) {
+        setState(() {
+          _showSeekIndicator = false;
+        });
+      }
+    });
+  }
 
   String _formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -356,20 +374,79 @@ class _DesktopHUDState extends State<DesktopHUD> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Gesture Background (Tapping hides/shows HUD or toggles playback)
+              // Gesture Background (Tapping hides HUD immediately; double-tap seeks -10s / +10s)
               Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: () {
-                    if (onBackgroundTap != null) {
-                      onBackgroundTap();
-                    } else {
-                      onPlayPause();
-                    }
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () {
+                        if (onBackgroundTap != null) {
+                          onBackgroundTap();
+                        }
+                      },
+                      onDoubleTapDown: (details) {
+                        final dx = details.localPosition.dx;
+                        if (dx < width * 0.35) {
+                          final newPos = position - const Duration(seconds: 10);
+                          onSeek(newPos < Duration.zero ? Duration.zero : newPos);
+                          _triggerSeekFeedback('-10s', isLeft: true);
+                        } else if (dx > width * 0.65) {
+                          final newPos = position + const Duration(seconds: 10);
+                          onSeek(newPos > duration ? duration : newPos);
+                          _triggerSeekFeedback('+10s', isLeft: false);
+                        }
+                      },
+                      child: Container(color: Colors.transparent),
+                    );
                   },
-                  child: Container(color: Colors.transparent),
                 ),
               ),
+
+              // Animated Double-Tap Seek Feedback Indicators
+              if (_showSeekIndicator && _seekIndicatorText != null)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: _seekIsLeft ? const Alignment(-0.65, 0.0) : const Alignment(0.65, 0.0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.75),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: AppColors.surfaceBorder),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.accent.withValues(alpha: 0.2),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _seekIsLeft ? Icons.replay_10_rounded : Icons.forward_10_rounded,
+                              color: AppColors.accent,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _seekIndicatorText!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
 
               // Concentric Center Play/Pause & Buffering Spinner (Exact Screen & Viewport Center)
               Center(

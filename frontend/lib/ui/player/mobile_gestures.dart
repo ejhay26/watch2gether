@@ -49,10 +49,10 @@ class _MobileGesturesOverlayState extends State<MobileGesturesOverlay> {
             final dx = details.localPosition.dx;
             if (dx < screenWidth * 0.35) {
               widget.onDoubleTapLeft();
-              _triggerIndicator('-5s');
+              _triggerIndicator('-10s');
             } else if (dx > screenWidth * 0.65) {
               widget.onDoubleTapRight();
-              _triggerIndicator('+5s');
+              _triggerIndicator('+10s');
             }
           },
           child: Stack(

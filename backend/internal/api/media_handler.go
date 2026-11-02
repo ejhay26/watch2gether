@@ -2,8 +2,12 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ejhay26/watch2gether/backend/internal/scraper"
 	"github.com/gofiber/fiber/v2"
@@ -30,6 +34,7 @@ func (h *MediaHandler) RegisterRoutes(router fiber.Router) {
 	api.Get("/sources", h.GetSources)
 	api.Get("/sources/tracked", h.GetTrackedSources)
 	api.Get("/subtitles/vtt", h.GetVTTSubtitles)
+	api.Get("/subtitles/proxy", h.ProxySubtitles)
 }
 
 func (h *MediaHandler) Health(c *fiber.Ctx) error {
@@ -217,6 +222,53 @@ Subtitles synchronized with multi-source video playback.
 `, title, strings.ToUpper(lang), title)
 
 	return c.SendString(vtt)
+}
+
+func (h *MediaHandler) ProxySubtitles(c *fiber.Ctx) error {
+	rawURL := c.Query("url")
+	if rawURL == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Missing 'url' query parameter",
+		})
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": fmt.Sprintf("Upstream server returned %d", resp.StatusCode),
+		})
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	content := string(bodyBytes)
+	c.Set("Content-Type", "text/vtt; charset=utf-8")
+	c.Set("Access-Control-Allow-Origin", "*")
+
+	// Convert SRT to WebVTT if needed
+	if !strings.HasPrefix(strings.TrimSpace(content), "WEBVTT") {
+		// Convert comma timestamps to dot timestamps e.g. 00:01:15,247 -> 00:01:15.247
+		reSRTTimestamp := regexp.MustCompile(`(\d{2}:\d{2}:\d{2}),(\d{3})`)
+		content = "WEBVTT\n\n" + reSRTTimestamp.ReplaceAllString(content, "${1}.${2}")
+	}
+
+	return c.SendString(content)
 }
 
 func (h *MediaHandler) GetTrackedSources(c *fiber.Ctx) error {

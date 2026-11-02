@@ -115,6 +115,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _showPartyPromptBanner(mediaId, title, streamUrl, episodeId, headers);
       };
       _checkForAppUpdate();
+      final localStore = Provider.of<LocalStoreService>(context, listen: false);
+      if (!localStore.hasCustomUsername) {
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (mounted && !localStore.hasCustomUsername) {
+            ProfileNameModal.show(context, isFirstBoot: true);
+          }
+        });
+      }
     });
   }
 

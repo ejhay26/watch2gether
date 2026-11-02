@@ -82,6 +82,7 @@ class LocalStoreService extends ChangeNotifier {
 
   static const String _keyPeerId = 'wt_peer_id';
   static const String _keyUsername = 'wt_username';
+  static const String _keyHasCustomUsername = 'wt_has_custom_username';
   static const String _keyAvatar = 'wt_avatar_seed';
   static const String _keyHistory = 'wt_local_history_v2';
   static const String _keyFavorites = 'wt_local_favorites_v2';
@@ -91,6 +92,7 @@ class LocalStoreService extends ChangeNotifier {
 
   String _peerId = '';
   String _username = '';
+  bool _hasCustomUsername = false;
   int _avatarIndex = 0;
   String _companionBackendUrl = '';
   int _meshDirectPort = 8888;
@@ -102,6 +104,7 @@ class LocalStoreService extends ChangeNotifier {
 
   String get peerId => _peerId;
   String get username => _username;
+  bool get hasCustomUsername => _hasCustomUsername;
   int get avatarIndex => _avatarIndex;
   String get companionBackendUrl => _companionBackendUrl;
   int get meshDirectPort => _meshDirectPort;
@@ -145,6 +148,16 @@ class LocalStoreService extends ChangeNotifier {
         await prefs.setString(_keyUsername, savedUsername);
       }
       _username = savedUsername;
+      final hasCustom = prefs.getBool(_keyHasCustomUsername);
+      if (hasCustom != null) {
+        _hasCustomUsername = hasCustom;
+      } else {
+        _hasCustomUsername = savedUsername != null &&
+            savedUsername.isNotEmpty &&
+            !savedUsername.startsWith('Host_') &&
+            !savedUsername.startsWith('Mobile_') &&
+            !savedUsername.startsWith('WebGuest_');
+      }
       _avatarIndex = prefs.getInt(_keyAvatar) ?? (_peerId.hashCode.abs() % 6);
 
       // 2. Default Companion Backend URL
@@ -210,10 +223,12 @@ class LocalStoreService extends ChangeNotifier {
   // --- Identity Management ---
   Future<void> updateUsername(String newName) async {
     final clean = newName.trim();
-    if (clean.isEmpty || clean == _username) return;
+    if (clean.isEmpty) return;
     _username = clean;
+    _hasCustomUsername = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyUsername, clean);
+    await prefs.setBool(_keyHasCustomUsername, true);
     notifyListeners();
   }
 

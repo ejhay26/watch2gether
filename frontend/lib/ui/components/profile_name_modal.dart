@@ -7,14 +7,17 @@ import '../../services/room_service.dart';
 import 'app_toast.dart';
 
 class ProfileNameModal extends StatefulWidget {
-  const ProfileNameModal({super.key});
+  final bool isFirstBoot;
+  const ProfileNameModal({super.key, this.isFirstBoot = false});
 
-  static Future<void> show(BuildContext context) {
+  static Future<void> show(BuildContext context, {bool isFirstBoot = false}) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      isDismissible: !isFirstBoot,
+      enableDrag: !isFirstBoot,
       backgroundColor: Colors.transparent,
-      builder: (_) => const ProfileNameModal(),
+      builder: (_) => ProfileNameModal(isFirstBoot: isFirstBoot),
     );
   }
 
@@ -111,20 +114,22 @@ class _ProfileNameModalState extends State<ProfileNameModal> {
                     child: const Icon(Icons.person_rounded, color: AppColors.accent, size: 22),
                   ),
                   const SizedBox(width: 12),
-                  const Column(
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Your Profile',
-                        style: TextStyle(
+                        widget.isFirstBoot ? 'Welcome to Watch2gether! 👋' : 'Your Profile',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        'Sovereign Identity • No Account Required',
-                        style: TextStyle(
+                        widget.isFirstBoot
+                            ? 'Choose your preferred name for watch parties & chat'
+                            : 'Sovereign Identity • No Account Required',
+                        style: const TextStyle(
                           color: AppColors.textSecondary,
                           fontSize: 12,
                         ),
@@ -243,9 +248,9 @@ class _ProfileNameModalState extends State<ProfileNameModal> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: _saveProfile,
-                  child: const Text(
-                    'Save Display Name',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  child: Text(
+                    widget.isFirstBoot ? 'Get Started' : 'Save Display Name',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ),
               ),

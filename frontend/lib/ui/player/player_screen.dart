@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -71,6 +73,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<String> _availableAudioTracks = [];
   List<Server> _availableServers = [];
   List<String> _availableSubtitles = ['Off'];
+  final Map<String, AudioTrack> _nativeAudioTrackMap = {};
+  final Map<String, Server> _serverAudioTrackMap = {};
+  final Map<String, SubtitleTrack> _nativeSubtitleTrackMap = {};
+  final Map<String, String> _externalSubtitleUrlMap = {};
+  Offset? _lastPointerPosition;
   StreamResult? _currentStreamResult;
   MediaItem? _details;
   bool _disposedForPiP = false;
@@ -133,6 +140,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _player.stream.buffering.listen((buffering) {
       if (mounted) setState(() => _isBuffering = buffering);
+    });
+
+    _player.stream.playing.listen((playing) {
+      if (mounted) {
+        if (playing) {
+          if (_controlsVisible) {
+            _startHideControlsTimer();
+          }
+        } else {
+          _hideControlsTimer?.cancel();
+        }
+      }
     });
 
     _player.stream.tracks.listen((tracks) {
@@ -214,66 +233,118 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (_) {}
   }
 
+  String _formatAudioTrackName(AudioTrack track, int index, int total) {
+    final title = track.title?.trim() ?? '';
+    final lang = track.language?.trim().toLowerCase() ?? '';
+
+    if (title.isNotEmpty && !title.toLowerCase().startsWith('track')) {
+      return total > 1 ? '$title (Track ${index + 1})' : title;
+    }
+
+    String langName = 'Track ${index + 1}';
+    if (lang == 'en' || lang == 'eng') {
+      langName = 'English';
+    } else if (lang == 'zh' || lang == 'zho' || lang == 'chi' || lang == 'yue') {
+      langName = 'Chinese / Cantonese';
+    } else if (lang == 'ja' || lang == 'jpn') {
+      langName = 'Japanese';
+    } else if (lang == 'ko' || lang == 'kor') {
+      langName = 'Korean';
+    } else if (lang == 'es' || lang == 'spa') {
+      langName = 'Spanish';
+    } else if (lang == 'fr' || lang == 'fra' || lang == 'fre') {
+      langName = 'French';
+    } else if (lang == 'de' || lang == 'deu' || lang == 'ger') {
+      langName = 'German';
+    } else if (lang == 'it' || lang == 'ita') {
+      langName = 'Italian';
+    } else if (lang == 'pt' || lang == 'por') {
+      langName = 'Portuguese';
+    } else if (lang == 'ru' || lang == 'rus') {
+      langName = 'Russian';
+    } else if (lang == 'hi' || lang == 'hin') {
+      langName = 'Hindi';
+    } else if (lang.isNotEmpty) {
+      langName = lang.toUpperCase();
+    }
+
+    return total > 1 ? '$langName (Track ${index + 1})' : langName;
+  }
+
   void _refreshAudioTracks() {
-    final audioSet = <String>{};
+    _nativeAudioTrackMap.clear();
+    _serverAudioTrackMap.clear();
+    _nativeSubtitleTrackMap.clear();
+    _externalSubtitleUrlMap.clear();
 
-    if (_isAnime) {
-      bool hasSub = false;
-      bool hasDub = false;
-      for (final s in _availableServers) {
-        if (s.name.toUpperCase().contains('[DUB]')) hasDub = true;
-        if (s.name.toUpperCase().contains('[SUB]')) hasSub = true;
-      }
-      if (hasSub) audioSet.add('[SUB] Japanese Audio');
-      if (hasDub) audioSet.add('[DUB] English Dub');
-    } else {
-      audioSet.add('Original Audio (English)');
-    }
+    final audioList = <String>[];
 
-    // Native player audio streams
-    final tracks = _player.state.tracks.audio;
-    for (int i = 0; i < tracks.length; i++) {
-      final a = tracks[i];
-      String lang = a.language ?? '';
-      String title = a.title ?? '';
-      if (title.isNotEmpty && title.toLowerCase() != 'track') {
-        audioSet.add(title);
-        continue;
-      }
-      String displayLang = 'English';
-      if (lang.toLowerCase() == 'en' || lang.toLowerCase() == 'eng') {
-        displayLang = 'English';
-      } else if (lang.toLowerCase() == 'ja' || lang.toLowerCase() == 'jpn') {
-        displayLang = 'Japanese';
-      } else if (lang.toLowerCase() == 'es' || lang.toLowerCase() == 'spa') {
-        displayLang = 'Spanish';
-      } else if (lang.toLowerCase() == 'fr' || lang.toLowerCase() == 'fra') {
-        displayLang = 'French';
-      } else if (lang.toLowerCase() == 'de' || lang.toLowerCase() == 'deu') {
-        displayLang = 'German';
-      }
-      if (tracks.length > 1) {
-        audioSet.add('$displayLang (Track ${i + 1})');
-      } else {
-        audioSet.add(displayLang);
+    // 1. Native player audio streams
+    final nativeAudio = _player.state.tracks.audio.where((a) => a.id != 'no').toList();
+    for (int i = 0; i < nativeAudio.length; i++) {
+      final a = nativeAudio[i];
+      final label = _formatAudioTrackName(a, i, nativeAudio.length);
+      _nativeAudioTrackMap[label] = a;
+      if (!audioList.contains(label)) {
+        audioList.add(label);
       }
     }
 
-    final audioList = audioSet.toList();
+    // 2. Alternative server audio feeds (e.g. dubs/subs)
+    bool hasSubServer = false;
+    bool hasDubServer = false;
+    for (final s in _availableServers) {
+      final up = s.name.toUpperCase();
+      if (up.contains('[DUB]') && !hasDubServer) {
+        hasDubServer = true;
+        const dubLabel = '[DUB] English Dub (Server)';
+        _serverAudioTrackMap[dubLabel] = s;
+        if (!audioList.contains(dubLabel)) audioList.add(dubLabel);
+      } else if (up.contains('[SUB]') && !hasSubServer) {
+        hasSubServer = true;
+        final subLabel = _isAnime ? '[SUB] Japanese Audio (Server)' : '[SUB] Original Audio (Server)';
+        _serverAudioTrackMap[subLabel] = s;
+        if (!audioList.contains(subLabel)) audioList.add(subLabel);
+      }
+    }
+
     if (audioList.isEmpty) {
       audioList.add('Default');
     }
 
+    // 3. Subtitles
     final subList = <String>['Off'];
-    for (int i = 0; i < _player.state.tracks.subtitle.length; i++) {
-      final s = _player.state.tracks.subtitle[i];
-      final lang = s.language ?? s.title ?? 'Subtitle ${i + 1}';
-      subList.add(lang);
+
+    // Native embedded subtitle tracks
+    final nativeSubs = _player.state.tracks.subtitle.where((s) => s.id != 'no').toList();
+    for (int i = 0; i < nativeSubs.length; i++) {
+      final s = nativeSubs[i];
+      String label = s.title?.trim() ?? '';
+      if (label.isEmpty) {
+        final lang = s.language?.trim().toLowerCase() ?? '';
+        if (lang == 'en' || lang == 'eng') {
+          label = 'English (Embedded)';
+        } else if (lang.isNotEmpty) {
+          label = '${lang.toUpperCase()} (Embedded)';
+        } else {
+          label = 'Subtitle ${i + 1} (Embedded)';
+        }
+      }
+      _nativeSubtitleTrackMap[label] = s;
+      if (!subList.contains(label)) subList.add(label);
     }
+
+    // External WebVTT / SRT subtitles from stream result
     if (_currentStreamResult != null) {
       for (final extSub in _currentStreamResult!.subtitles) {
-        if (extSub.lang.isNotEmpty && !subList.contains(extSub.lang)) {
-          subList.add(extSub.lang);
+        if (extSub.url.trim().isEmpty || extSub.lang.toLowerCase() == 'off') continue;
+        String label = extSub.lang.trim();
+        if (subList.contains(label)) {
+          label = '$label (External)';
+        }
+        _externalSubtitleUrlMap[label] = extSub.url.trim();
+        if (!subList.contains(label)) {
+          subList.add(label);
         }
       }
     }
@@ -281,7 +352,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() {
       _availableAudioTracks = audioList;
       _availableSubtitles = subList;
-      if (_currentAudioTrack == 'Default' && audioList.isNotEmpty) {
+      if ((_currentAudioTrack == 'Default' || !_availableAudioTracks.contains(_currentAudioTrack)) &&
+          audioList.isNotEmpty) {
         _currentAudioTrack = audioList.first;
       }
     });
@@ -573,79 +645,115 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _switchAudioTrack(String trackLabel) async {
     setState(() => _currentAudioTrack = trackLabel);
 
-    if (trackLabel.toUpperCase().contains('[DUB]') || trackLabel.toUpperCase().contains('[SUB]')) {
-      final isDub = trackLabel.toUpperCase().contains('[DUB]');
-      Server? targetSrv;
-      for (final s in _availableServers) {
-        if (isDub && s.name.toUpperCase().contains('[DUB]')) {
-          targetSrv = s;
-          break;
-        } else if (!isDub && s.name.toUpperCase().contains('[SUB]')) {
-          targetSrv = s;
-          break;
-        }
+    // 1. If it's a native mpv audio stream
+    if (_nativeAudioTrackMap.containsKey(trackLabel)) {
+      final targetTrack = _nativeAudioTrackMap[trackLabel]!;
+      await _player.setAudioTrack(targetTrack);
+      if (mounted) {
+        AppToast.show(context, 'Audio switched: $trackLabel', type: ToastType.info);
       }
-      if (targetSrv == null) {
-        final epId = _currentEpisodeId ?? widget.episodeId ?? widget.mediaId;
-        final freshSrvs = await ApiService().getServers(epId, title: _currentTitle);
-        for (final s in freshSrvs) {
-          if (isDub && s.name.toUpperCase().contains('[DUB]')) {
-            targetSrv = s;
-            break;
-          } else if (!isDub && s.name.toUpperCase().contains('[SUB]')) {
-            targetSrv = s;
-            break;
-          }
-        }
-        if (freshSrvs.isNotEmpty && mounted) {
-          setState(() => _availableServers = freshSrvs);
-        }
-      }
-      if (targetSrv != null) {
-        final currentPos = _player.state.position;
-        final res = await ApiService().getSources(targetSrv.id, title: _currentTitle);
-        if (res != null && res.sources.isNotEmpty) {
-          setState(() {
-            _currentStreamUrl = res.sources.first.url;
-            _currentStreamResult = res;
-          });
-          _openMedia(res.sources.first.url, headers: res.headers);
-          await _player.seek(currentPos);
-          _player.play();
-          return;
-        }
+      return;
+    }
+
+    // 2. If it's a server switch (e.g. DUB vs SUB mirror)
+    if (_serverAudioTrackMap.containsKey(trackLabel)) {
+      final srv = _serverAudioTrackMap[trackLabel]!;
+      final currentPos = _player.state.position;
+      final res = await ApiService().getSources(srv.id, title: _currentTitle);
+      if (res != null && res.sources.isNotEmpty && mounted) {
+        setState(() {
+          _currentStreamUrl = res.sources.first.url;
+          _currentStreamResult = res;
+        });
+        _openMedia(res.sources.first.url, headers: res.headers);
+        await _player.seek(currentPos);
+        _player.play();
+        AppToast.show(context, 'Audio feed switched: $trackLabel', type: ToastType.success);
+        return;
       }
     }
 
+    // Fallback: check tracks directly
     final tracks = _player.state.tracks.audio;
-    for (int i = 0; i < _availableAudioTracks.length; i++) {
-      if (_availableAudioTracks[i] == trackLabel && i < tracks.length) {
-        _player.setAudioTrack(tracks[i]);
+    for (final t in tracks) {
+      if (t.title == trackLabel || t.language == trackLabel) {
+        await _player.setAudioTrack(t);
         return;
       }
     }
   }
 
-  void _switchSubtitle(String sub) {
+  Future<void> _switchSubtitle(String sub) async {
     setState(() => _currentSubtitleTrack = sub);
+
     if (sub == 'Off') {
-      _player.setSubtitleTrack(SubtitleTrack.no());
-    } else {
-      final tracks = _player.state.tracks.subtitle;
-      for (final t in tracks) {
-        if ((t.language != null && t.language!.toLowerCase() == sub.toLowerCase()) ||
-            (t.title != null && t.title!.toLowerCase().contains(sub.toLowerCase()))) {
-          _player.setSubtitleTrack(t);
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+      if (mounted) {
+        AppToast.show(context, 'Subtitles turned off', type: ToastType.info);
+      }
+      return;
+    }
+
+    // 1. If it's a native mpv subtitle track
+    if (_nativeSubtitleTrackMap.containsKey(sub)) {
+      await _player.setSubtitleTrack(_nativeSubtitleTrackMap[sub]!);
+      if (mounted) {
+        AppToast.show(context, 'Subtitles: $sub', type: ToastType.success);
+      }
+      return;
+    }
+
+    // 2. If it's an external WebVTT / SRT subtitle
+    if (_externalSubtitleUrlMap.containsKey(sub)) {
+      final rawUrl = _externalSubtitleUrlMap[sub]!;
+      try {
+        String fetchUrl = rawUrl;
+        if (fetchUrl.startsWith('/')) {
+          final base = ApiService().baseUrl;
+          fetchUrl = '$base$fetchUrl';
+        }
+        final dio = Dio();
+        final resp = await dio.get<String>(
+          fetchUrl,
+          options: Options(
+            headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
+            responseType: ResponseType.plain,
+            sendTimeout: const Duration(seconds: 10),
+            receiveTimeout: const Duration(seconds: 10),
+          ),
+        );
+        if (resp.data != null && resp.data!.isNotEmpty) {
+          String content = resp.data!;
+          // Ensure standard WebVTT formatting if incoming is SRT
+          if (!content.trimLeft().startsWith('WEBVTT')) {
+            final reSRT = RegExp(r'(\d{2}:\d{2}:\d{2}),(\d{3})');
+            content = 'WEBVTT\n\n${content.replaceAllMapped(reSRT, (m) => '${m[1]}.${m[2]}')}';
+          }
+          await _player.setSubtitleTrack(SubtitleTrack.data(content, title: sub, language: sub));
+          if (mounted) {
+            AppToast.show(context, 'Subtitles: $sub', type: ToastType.success);
+          }
           return;
         }
-      }
-      if (_currentStreamResult != null) {
-        for (final s in _currentStreamResult!.subtitles) {
-          if (s.lang.toLowerCase() == sub.toLowerCase() && s.url.isNotEmpty) {
-            _player.setSubtitleTrack(SubtitleTrack.uri(s.url));
-            return;
+      } catch (e) {
+        // Fallback: load as direct URI in media_kit
+        try {
+          await _player.setSubtitleTrack(SubtitleTrack.uri(rawUrl, title: sub, language: sub));
+          if (mounted) {
+            AppToast.show(context, 'Subtitles: $sub', type: ToastType.info);
           }
-        }
+          return;
+        } catch (_) {}
+      }
+    }
+
+    // Fallback: scan tracks
+    final tracks = _player.state.tracks.subtitle;
+    for (final t in tracks) {
+      if ((t.language != null && t.language!.toLowerCase() == sub.toLowerCase()) ||
+          (t.title != null && t.title!.toLowerCase().contains(sub.toLowerCase()))) {
+        await _player.setSubtitleTrack(t);
+        return;
       }
     }
   }
@@ -755,6 +863,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
+  void _handleBackgroundTap() {
+    setState(() {
+      _controlsVisible = !_controlsVisible;
+    });
+    if (_controlsVisible) {
+      _startHideControlsTimer();
+    } else {
+      _hideControlsTimer?.cancel();
+    }
+  }
+
   void _onUserInteraction() {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
@@ -764,8 +883,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _startHideControlsTimer() {
     _hideControlsTimer?.cancel();
-    if (_player.state.playing) {
-      _hideControlsTimer = Timer(const Duration(seconds: 4), () {
+    if (_player.state.playing && mounted) {
+      _hideControlsTimer = Timer(const Duration(milliseconds: 3500), () {
         if (mounted && _player.state.playing) {
           setState(() => _controlsVisible = false);
         }
@@ -940,20 +1059,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _buildVideoPlayerWithHUD(RoomService roomService, bool isRoomActive) {
     return MouseRegion(
-      onHover: (_) => _onUserInteraction(),
+      onHover: (event) {
+        if (_lastPointerPosition == null) {
+          _lastPointerPosition = event.position;
+          return;
+        }
+        final distSq = (event.position - _lastPointerPosition!).distanceSquared;
+        if (distSq > 16.0) {
+          _lastPointerPosition = event.position;
+          _onUserInteraction();
+        }
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
           MobileGesturesOverlay(
-            onTap: () {
-              setState(() => _controlsVisible = !_controlsVisible);
-              if (_controlsVisible) _startHideControlsTimer();
-            },
+            onTap: _handleBackgroundTap,
             onDoubleTapLeft: () {
-              _seek(_player.state.position - const Duration(seconds: 5));
+              _seek(_player.state.position - const Duration(seconds: 10));
             },
             onDoubleTapRight: () {
-              _seek(_player.state.position + const Duration(seconds: 5));
+              _seek(_player.state.position + const Duration(seconds: 10));
             },
             child: Stack(
               alignment: Alignment.center,
@@ -1079,6 +1205,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     onSelectQuality: _switchSource,
                     onSelectAudioTrack: _switchAudioTrack,
                     onSelectSubtitle: _switchSubtitle,
+                    onBackgroundTap: _handleBackgroundTap,
                       );
                     },
                   );
