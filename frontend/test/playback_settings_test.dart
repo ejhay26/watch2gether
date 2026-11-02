@@ -63,4 +63,15 @@ void main() {
     expect(server.audio, 'Original audio. May have 4K');
     expect(server.badge, 'Original');
   });
+
+  test('SubtitleTrack model deserialization and online subtitle selection test', () {
+    final json = {
+      'url': '/api/v1/subtitles/proxy?url=https%3A%2F%2Fsubs.strem.io%2F123&title=Kimi&lang=English',
+      'lang': 'English [CC]',
+    };
+
+    final track = SubtitleTrack.fromJson(json);
+    expect(track.url, contains('/api/v1/subtitles/proxy'));
+    expect(track.lang, 'English [CC]');
+  });
 }

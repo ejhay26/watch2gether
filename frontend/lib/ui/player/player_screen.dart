@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../constants/theme.dart';
 import '../../models/media_item.dart' hide SubtitleTrack;
+import '../../models/media_item.dart' as models show SubtitleTrack;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_store_service.dart';
@@ -149,9 +150,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) setState(() => _isBuffering = buffering);
       if (buffering) {
         _bufferingWatchdog?.cancel();
-        _bufferingWatchdog = Timer(const Duration(seconds: 8), () {
+        _bufferingWatchdog = Timer(const Duration(seconds: 35), () {
           if (mounted && _isBuffering && _player.state.position == Duration.zero) {
-            // Player has been stuck buffering for 8 seconds without playback progress
+            // Player has been stuck buffering for 35 seconds without playback progress
             if (_currentServer != null) {
               setState(() {
                 _serverStatuses[_currentServer!.id] = ServerStateStatus.failed;
@@ -166,6 +167,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           }
         });
       } else {
+        _bufferingWatchdog?.cancel();
+      }
+    });
+
+    _player.stream.position.listen((pos) {
+      if (pos > Duration.zero) {
         _bufferingWatchdog?.cancel();
       }
     });
@@ -251,6 +258,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       return;
     }
+    _bufferingWatchdog?.cancel();
     _player.stop();
     _player.open(Media(url, httpHeaders: headers));
 
@@ -293,6 +301,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _loadServerAndStream(Server srv, {bool isAutoFailover = false}) async {
+    _bufferingWatchdog?.cancel();
     setState(() {
       _currentServer = srv;
       _serverStatuses[srv.id] = ServerStateStatus.loading;
@@ -412,6 +421,75 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (e) {
       if (mounted) {
         AppToast.show(context, 'Failed to apply uploaded subtitle', type: ToastType.error);
+      }
+    }
+  }
+
+  Future<void> _selectOnlineSubtitle(models.SubtitleTrack item) async {
+    String label = item.lang.trim();
+    if (label.isEmpty) label = 'External Subtitle';
+    if (_availableSubtitles.contains(label) && !_externalSubtitleUrlMap.containsKey(label)) {
+      label = '$label (Online)';
+    }
+
+    String fetchUrl = item.url.trim();
+    if (fetchUrl.startsWith('/')) {
+      final base = ApiService().baseUrl;
+      fetchUrl = '$base$fetchUrl';
+    }
+
+    try {
+      final dio = Dio();
+      final resp = await dio.get<String>(
+        fetchUrl,
+        options: Options(
+          headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
+        ),
+      );
+
+      if (resp.data != null && resp.data!.trim().isNotEmpty) {
+        String content = resp.data!;
+        if (!content.trimLeft().startsWith('WEBVTT')) {
+          final reSRT = RegExp(r'(\d{2}:\d{2}:\d{2}),(\d{3})');
+          content = 'WEBVTT\n\n${content.replaceAllMapped(reSRT, (m) => '${m[1]}.${m[2]}')}';
+        }
+
+        await _player.setSubtitleTrack(SubtitleTrack.data(content, title: label, language: label));
+        if (mounted) {
+          setState(() {
+            _currentSubtitleTrack = label;
+            _externalSubtitleUrlMap[label] = item.url.trim();
+            if (!_availableSubtitles.contains(label)) {
+              _availableSubtitles.add(label);
+            }
+          });
+          AppToast.show(context, 'Subtitles loaded: $label', type: ToastType.success);
+        }
+        return;
+      }
+    } catch (e) {
+      // Fallback: direct URI in media_kit
+      try {
+        await _player.setSubtitleTrack(SubtitleTrack.uri(fetchUrl, title: label, language: label));
+        if (mounted) {
+          setState(() {
+            _currentSubtitleTrack = label;
+            _externalSubtitleUrlMap[label] = item.url.trim();
+            if (!_availableSubtitles.contains(label)) {
+              _availableSubtitles.add(label);
+            }
+          });
+          AppToast.show(context, 'Subtitles loaded: $label', type: ToastType.info);
+        }
+        return;
+      } catch (err) {
+        if (mounted) {
+          AppToast.show(context, 'Failed to download subtitle: $err', type: ToastType.error);
+        }
+        rethrow;
       }
     }
   }
@@ -889,12 +967,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 2. If it's an external WebVTT / SRT subtitle
     if (_externalSubtitleUrlMap.containsKey(sub)) {
       final rawUrl = _externalSubtitleUrlMap[sub]!;
+      String fetchUrl = rawUrl;
+      if (fetchUrl.startsWith('/')) {
+        final base = ApiService().baseUrl;
+        fetchUrl = '$base$fetchUrl';
+      }
       try {
-        String fetchUrl = rawUrl;
-        if (fetchUrl.startsWith('/')) {
-          final base = ApiService().baseUrl;
-          fetchUrl = '$base$fetchUrl';
-        }
         final dio = Dio();
         final resp = await dio.get<String>(
           fetchUrl,
@@ -921,7 +999,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } catch (e) {
         // Fallback: load as direct URI in media_kit
         try {
-          await _player.setSubtitleTrack(SubtitleTrack.uri(rawUrl, title: sub, language: sub));
+          await _player.setSubtitleTrack(SubtitleTrack.uri(fetchUrl, title: sub, language: sub));
           if (mounted) {
             AppToast.show(context, 'Subtitles: $sub', type: ToastType.info);
           }
@@ -1456,6 +1534,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       onUploadSubtitle: (fileName, content) async {
                         await _applyUploadedSubtitle(fileName, content);
                       },
+                      onSelectOnlineSubtitle: _selectOnlineSubtitle,
                       onClose: () => setState(() => _isPlayerSettingsOpen = false),
                     ),
                   ),

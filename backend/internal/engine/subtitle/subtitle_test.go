@@ -1,4 +1,4 @@
-﻿package subtitle
+package subtitle
 
 import (
 	"context"
@@ -28,3 +28,30 @@ func TestSubtitleEngine(t *testing.T) {
 		t.Errorf("Expected English [CC] subtitle track")
 	}
 }
+
+func TestSearchSubtitles(t *testing.T) {
+	se := NewSubtitleEngine()
+	ctx := context.Background()
+
+	subs, err := se.SearchSubtitles(ctx, "The Paramedic", "", "")
+	if err != nil {
+		t.Fatalf("SearchSubtitles failed: %v", err)
+	}
+	if len(subs) == 0 {
+		t.Fatalf("Expected at least 1 subtitle track for 'The Paramedic'")
+	}
+	t.Logf("The Paramedic returned %d subtitles", len(subs))
+	for _, s := range subs {
+		t.Logf("Subtitle: %s -> %s", s.Lang, s.URL)
+	}
+
+	kimiSubs, err := se.SearchSubtitles(ctx, "Kimi", "", "")
+	if err != nil {
+		t.Fatalf("SearchSubtitles for Kimi failed: %v", err)
+	}
+	if len(kimiSubs) == 0 {
+		t.Fatalf("Expected at least 1 subtitle track for 'Kimi'")
+	}
+	t.Logf("Kimi returned %d subtitles", len(kimiSubs))
+}
+

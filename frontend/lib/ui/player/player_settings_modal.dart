@@ -32,6 +32,7 @@ class PlayerSettingsModal extends StatefulWidget {
   final ValueChanged<String> onSelectAudioTrack;
   final ValueChanged<String> onToggleFavoriteServer;
   final Future<void> Function(String fileName, String content) onUploadSubtitle;
+  final Future<void> Function(SubtitleTrack item)? onSelectOnlineSubtitle;
   final VoidCallback onClose;
   final PlayerSettingsTab initialTab;
 
@@ -55,6 +56,7 @@ class PlayerSettingsModal extends StatefulWidget {
     required this.onSelectAudioTrack,
     required this.onToggleFavoriteServer,
     required this.onUploadSubtitle,
+    this.onSelectOnlineSubtitle,
     required this.onClose,
     this.initialTab = PlayerSettingsTab.subs,
   });
@@ -71,6 +73,7 @@ class _PlayerSettingsModalState extends State<PlayerSettingsModal> {
   List<SubtitleTrack> _openSubResults = [];
   bool _isSearchingSubs = false;
   String _selectedSubLang = 'All';
+  String? _downloadingSubUrl;
 
   @override
   void initState() {
@@ -552,6 +555,7 @@ class _PlayerSettingsModalState extends State<PlayerSettingsModal> {
                       itemCount: _openSubResults.length,
                       itemBuilder: (ctx, idx) {
                         final item = _openSubResults[idx];
+                        final isDownloading = _downloadingSubUrl == item.url;
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
@@ -571,11 +575,39 @@ class _PlayerSettingsModalState extends State<PlayerSettingsModal> {
                               style: const TextStyle(color: Colors.white38, fontSize: 11),
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: const Icon(Icons.download_rounded, color: Colors.white60, size: 18),
-                            onTap: () {
-                              widget.onSelectSubtitle(item.lang);
-                              setState(() => _isSearchingOpenSubtitles = false);
-                            },
+                            trailing: isDownloading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.accent,
+                                    ),
+                                  )
+                                : const Icon(Icons.download_rounded, color: Colors.white60, size: 18),
+                            onTap: isDownloading
+                                ? null
+                                : () async {
+                                    setState(() => _downloadingSubUrl = item.url);
+                                    try {
+                                      if (widget.onSelectOnlineSubtitle != null) {
+                                        await widget.onSelectOnlineSubtitle!(item);
+                                      } else {
+                                        widget.onSelectSubtitle(item.lang);
+                                      }
+                                      if (mounted) {
+                                        setState(() {
+                                          _downloadingSubUrl = null;
+                                          _isSearchingOpenSubtitles = false;
+                                        });
+                                      }
+                                    } catch (e) {
+                                      if (mounted) {
+                                        setState(() => _downloadingSubUrl = null);
+                                        AppToast.show(context, 'Failed to download subtitle: $e', type: ToastType.error);
+                                      }
+                                    }
+                                  },
                           ),
                         );
                       },

@@ -385,7 +385,7 @@ func (p *TMDBFeatureProvider) ScrapeFlixHQ(ctx context.Context, cleanTitle strin
 						if len(m3u8Matches) > 0 {
 							sources = append(sources, model.Source{
 								URL:     m3u8Matches[0],
-								Quality: fmt.Sprintf("1080p HD (Server 1 - %s)", srvName),
+								Quality: fmt.Sprintf("1080p HD (%s)", srvName),
 								IsM3U8:  true,
 							})
 						}

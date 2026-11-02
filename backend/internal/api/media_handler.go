@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -256,6 +258,16 @@ func (h *MediaHandler) ProxySubtitles(c *fiber.Ctx) error {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Decompress gzip if upstream returns compressed payload (e.g. OpenSubtitles .gz or raw gzip stream)
+	if bytes.HasPrefix(bodyBytes, []byte{0x1f, 0x8b}) || strings.HasSuffix(strings.ToLower(rawURL), ".gz") {
+		if gzReader, err := gzip.NewReader(bytes.NewReader(bodyBytes)); err == nil {
+			if decompressed, err := io.ReadAll(gzReader); err == nil {
+				bodyBytes = decompressed
+			}
+			gzReader.Close()
+		}
 	}
 
 	content := string(bodyBytes)

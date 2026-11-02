@@ -83,14 +83,15 @@ func TestVideoEngineDynamicServersAndStream(t *testing.T) {
 	}
 }
 
-func TestTaleOfTales(t *testing.T) {
+func TestKimi(t *testing.T) {
 	ve := NewVideoEngine(nil)
-	stream, err := ve.GetStream(context.Background(), "tmdb-movie-314405-srv-master", "Tale of Tales")
+	stream, err := ve.GetStream(context.Background(), "tmdb-movie-800510-ep1-srv-yoru", "Kimi")
 	if err != nil {
-		t.Fatalf("Failed to get stream: %v", err)
+		t.Fatalf("Kimi error: %v", err)
 	}
-	for i, s := range stream.Sources {
-		t.Logf("Source %d: %s (%s, is_m3u8: %v)", i, s.Quality, s.URL, s.IsM3U8)
+	t.Logf("Kimi returned %d sources", len(stream.Sources))
+	for _, s := range stream.Sources {
+		t.Logf("Source: %s -> %s", s.Quality, s.URL)
 	}
 }
 

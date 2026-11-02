@@ -589,9 +589,19 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 
 		stream, err := m.videoEngine.GetStream(ctx, serverId, title)
 		if err == nil && stream != nil && len(stream.Sources) > 0 {
-			if len(stream.Subtitles) == 0 {
+			if len(stream.Subtitles) <= 1 {
 				subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
-				stream.Subtitles = subs
+				seenLangs := make(map[string]bool)
+				for _, s := range stream.Subtitles {
+					seenLangs[strings.ToLower(strings.TrimSpace(s.Lang))] = true
+				}
+				for _, s := range subs {
+					key := strings.ToLower(strings.TrimSpace(s.Lang))
+					if !seenLangs[key] {
+						seenLangs[key] = true
+						stream.Subtitles = append(stream.Subtitles, s)
+					}
+				}
 			}
 			return stream, nil
 		}
@@ -607,9 +617,19 @@ func (m *Manager) GetStreamWithTitle(serverId string, title string) (*StreamResu
 
 	stream, err := m.videoEngine.GetStream(ctx, serverId, title)
 	if err == nil && stream != nil && len(stream.Sources) > 0 {
-		if len(stream.Subtitles) == 0 {
+		if len(stream.Subtitles) <= 1 {
 			subs, _ := m.subtitleEngine.GetSubtitles(ctx, serverId, title)
-			stream.Subtitles = subs
+			seenLangs := make(map[string]bool)
+			for _, s := range stream.Subtitles {
+				seenLangs[strings.ToLower(strings.TrimSpace(s.Lang))] = true
+			}
+			for _, s := range subs {
+				key := strings.ToLower(strings.TrimSpace(s.Lang))
+				if !seenLangs[key] {
+					seenLangs[key] = true
+					stream.Subtitles = append(stream.Subtitles, s)
+				}
+			}
 		}
 		return stream, nil
 	}

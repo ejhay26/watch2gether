@@ -154,10 +154,18 @@ func (e *VideoEngine) GetStream(ctx context.Context, serverID string, title stri
 	if title != "" {
 		res, err := e.featureProvider.ResolveFeatureStream(ctx, mediaID, title)
 		if err == nil && res != nil && len(res.Sources) > 0 {
-			sources := res.Sources
-			if strings.HasSuffix(serverID, "-srv-2") && len(sources) > 1 {
-				sources = []model.Source{sources[1], sources[0]}
+			sources := make([]model.Source, len(res.Sources))
+			copy(sources, res.Sources)
+
+			// Rotate sources per server to offer mirror variety when multiple sources exist
+			if (strings.HasSuffix(serverID, "-srv-cypher") || strings.HasSuffix(serverID, "-srv-2")) && len(sources) > 1 {
+				sources = append(sources[1:], sources[0])
+			} else if strings.HasSuffix(serverID, "-srv-breach") && len(sources) > 2 {
+				sources = append(sources[2:], sources[:2]...)
+			} else if strings.HasSuffix(serverID, "-srv-neon") && len(sources) > 3 {
+				sources = append(sources[3:], sources[:3]...)
 			}
+
 			result := &model.StreamResult{
 				Sources:   sources,
 				Subtitles: res.Subtitles,
